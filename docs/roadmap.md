@@ -22,14 +22,24 @@ Note: `constants/site.ts` has `SITE_URL` set to a placeholder domain
 (`https://nextlayer.cloud`) — override via `NEXT_PUBLIC_SITE_URL` once a real production
 domain is assigned, since it feeds the sitemap, robots.txt, and OG image URLs.
 
-## Phase 2 — Database & ORM Foundation
+## Phase 2 — Database & ORM Foundation ✅ Done
 
-Schema design comes before any backend code, since auth, files, and billing all depend on it.
-
-- MySQL 8 instance (local Docker for dev, managed instance for prod)
-- Prisma schema: `User`, `Organization`, `Membership`/`Role`, `File`, `Folder`,
-  `Permission`, `Session`, `AuditLog`, `Plan`/`Subscription` as a starting model
-- Migrations workflow, seed data for local dev
+- ✅ Local MySQL (native install, not Docker — Docker wasn't available on this machine)
+- ✅ Prisma 7 schema (`prisma/schema.prisma`) covering `User`, `Organization`,
+  `Membership`, `Team`/`TeamMembership`, `Folder`, `File`/`FileVersion`, `Permission`,
+  `ShareLink`, `Comment`, `AuditLog` (doubles as activity feed), `Session`,
+  `Plan`/`Subscription`, `SsoConnection`
+- ✅ Initial migration applied (`prisma/migrations/20260806175727_init`)
+- ✅ Idempotent seed script (`prisma/seed.ts`) — demo org "Acme Labs" (matches the
+  Solutions page testimonial), 3 users, a team, nested folders, an active subscription
+- ✅ Prisma Client singleton at `src/lib/prisma.ts`, using the new v7 driver-adapter
+  architecture (`@prisma/adapter-mariadb`)
+- Note: Prisma 7 uses `prisma.config.ts` for the datasource URL (not `schema.prisma`
+  directly) and generates the client to `src/generated/prisma` (gitignored, regenerated
+  via `postinstall`) — this differs from older Prisma major versions.
+- Note: local MySQL required `127.0.0.1` instead of `localhost` in `DATABASE_URL` — an
+  IPv6 resolution quirk with this machine's MySQL build caused `localhost` to fail to
+  connect even though the port was reachable.
 
 ## Phase 3 — Backend API (NestJS)
 
