@@ -1,7 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
+# dependencies (npm workspaces hoist to root, but ignore everywhere)
+node_modules/
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -13,12 +14,12 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# next.js (apps/web)
+**/.next/
+**/out/
 
-# production
-/build
+# nest.js (apps/api)
+**/dist/
 
 # misc
 .DS_Store
@@ -39,6 +40,7 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+**/next-env.d.ts
 
-/src/generated/prisma
+# generated Prisma client (packages/database)
+packages/database/src/generated

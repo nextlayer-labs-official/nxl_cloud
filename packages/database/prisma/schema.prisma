@@ -4,8 +4,9 @@
 // expiring share links, audit/activity logging, SSO/SCIM, and plan-based billing.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {

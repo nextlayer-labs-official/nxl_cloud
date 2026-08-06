@@ -2,53 +2,26 @@
   "name": "nextlayer-cloud",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
-    "start": "next start",
-    "lint": "eslint",
+    "dev:web": "npm run dev --workspace=@nextlayer/web",
+    "dev:api": "npm run dev --workspace=@nextlayer/api",
+    "build:web": "npm run build --workspace=@nextlayer/web",
+    "build:api": "npm run build --workspace=@nextlayer/api",
+    "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "postinstall": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:seed": "prisma db seed",
-    "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset"
-  },
-  "dependencies": {
-    "@hookform/resolvers": "^5.7.1",
-    "@prisma/adapter-mariadb": "^7.9.1",
-    "@prisma/client": "^7.9.1",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "framer-motion": "^13.0.0",
-    "lucide-react": "^1.29.0",
-    "mariadb": "^3.5.3",
-    "next": "15.5.22",
-    "radix-ui": "^1.6.7",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "react-hook-form": "^7.84.0",
-    "shadcn": "^4.16.2",
-    "tailwind-merge": "^3.6.0",
-    "tw-animate-css": "^1.4.0",
-    "zod": "^4.4.3"
+    "postinstall": "npm run generate --workspace=@nextlayer/database && npm run build --workspace=@nextlayer/database",
+    "db:generate": "npm run generate --workspace=@nextlayer/database && npm run build --workspace=@nextlayer/database",
+    "db:migrate": "npm run migrate --workspace=@nextlayer/database",
+    "db:seed": "npm run seed --workspace=@nextlayer/database",
+    "db:studio": "npm run studio --workspace=@nextlayer/database"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
-    "eslint": "^9",
-    "eslint-config-next": "15.5.22",
-    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.6",
-    "prettier-plugin-tailwindcss": "^0.8.1",
-    "prisma": "^7.9.1",
-    "tailwindcss": "^4",
-    "tsx": "^4.23.9",
-    "typescript": "^5"
+    "prettier-plugin-tailwindcss": "^0.8.1"
   }
 }

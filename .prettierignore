@@ -1,6 +1,7 @@
 node_modules
-.next
-out
-build
-design-export
+**/.next
+**/dist
+**/out
+**/build
+**/src/generated
 package-lock.json

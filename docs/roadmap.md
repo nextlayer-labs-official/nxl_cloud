@@ -32,22 +32,38 @@ domain is assigned, since it feeds the sitemap, robots.txt, and OG image URLs.
 - ✅ Initial migration applied (`prisma/migrations/20260806175727_init`)
 - ✅ Idempotent seed script (`prisma/seed.ts`) — demo org "Acme Labs" (matches the
   Solutions page testimonial), 3 users, a team, nested folders, an active subscription
-- ✅ Prisma Client singleton at `src/lib/prisma.ts`, using the new v7 driver-adapter
-  architecture (`@prisma/adapter-mariadb`)
+- ✅ Prisma Client singleton, using the new v7 driver-adapter architecture
+  (`@prisma/adapter-mariadb`) — originally lived at `src/lib/prisma.ts` in the
+  single-package layout, relocated to `packages/database/src/index.ts` when Phase 3
+  restructured the repo into a monorepo (Next.js no longer touches the DB directly)
 - Note: Prisma 7 uses `prisma.config.ts` for the datasource URL (not `schema.prisma`
-  directly) and generates the client to `src/generated/prisma` (gitignored, regenerated
+  directly) and generates the client to a custom output path (gitignored, regenerated
   via `postinstall`) — this differs from older Prisma major versions.
 - Note: local MySQL required `127.0.0.1` instead of `localhost` in `DATABASE_URL` — an
   IPv6 resolution quirk with this machine's MySQL build caused `localhost` to fail to
   connect even though the port was reachable.
+- Note: Prisma 7's `prisma-client` generator outputs **ESM by default** (uses
+  `import.meta.url` internally), which breaks under Node's CJS `require()` — needed
+  `moduleFormat = "cjs"` in the generator block once the client had to be consumed
+  across a workspace boundary (by `apps/api`) instead of within the same app that
+  generates it.
 
-## Phase 3 — Backend API (NestJS)
+## Phase 3 — Backend API (NestJS) — scaffold ✅ done, real endpoints pending
 
-- Project scaffold: modules, DTOs, validation (class-validator/Zod), global error handling
-- Connect to Prisma via a `PrismaModule`
-- REST or GraphQL decision (REST is the more conservative default given NestJS's maturity there)
-- Environment/config management, logging, health-check endpoint
-- API versioning strategy from day one (`/api/v1/...`)
+Repo restructured into an npm-workspaces monorepo: `apps/web` (Next.js, unchanged),
+`apps/api` (new NestJS app), `packages/database` (shared Prisma schema/client, now a
+proper package with its own `tsc` build step so `apps/api` can `require()` it as
+compiled CommonJS rather than raw TypeScript).
+
+- ✅ NestJS 11 scaffold (`apps/api`) — `AppModule`, root controller, ESLint flat config
+- ✅ `HealthModule` (`GET /health`) — proves the full chain end-to-end by querying
+  `organization.count()` through `@nextlayer/database`; verified returning live data
+  from the seeded MySQL database
+- ⏳ DTOs, validation (class-validator or Zod), global exception filter — not done,
+  deferred until there are real endpoints to validate (Phase 4 auth will be first)
+- ⏳ REST vs. GraphQL — still just the conservative REST default, no formal decision made
+- ⏳ API versioning strategy (`/api/v1/...`) — not applied yet, only `/` and `/health` exist
+- ⏳ Structured logging, request/response interceptors — not done
 
 ## Phase 4 — Authentication
 
