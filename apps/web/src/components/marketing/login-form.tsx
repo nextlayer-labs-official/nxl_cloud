@@ -1,11 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { FormField } from "@/components/common/form-field";
+import { API_URL } from "@/constants/site";
 
 export function LoginForm() {
-  const [error, setError] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.message ?? "Incorrect email or password.");
+        return;
+      }
+
+      setSuccess(true);
+    } catch {
+      setError("Couldn't reach the server. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <>
+        <h1 className="mb-2 text-center text-2xl font-bold tracking-[-0.02em]">Welcome back</h1>
+        <p className="text-muted-foreground text-center text-sm">You&apos;re logged in.</p>
+      </>
+    );
+  }
 
   return (
     <>
@@ -15,7 +55,7 @@ export function LoginForm() {
 
       {error && (
         <div className="border-error-border bg-error-bg text-error-text mb-5 rounded-lg border p-3.5 text-[13px]">
-          Incorrect email or password.
+          {error}
         </div>
       )}
 
@@ -40,14 +80,16 @@ export function LoginForm() {
         <div className="bg-border h-px flex-1" />
       </div>
 
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setError(true);
-        }}
-      >
-        <FormField id="l-email" label="Email" type="email" />
+      <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+        <FormField
+          id="l-email"
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          required
+        />
         <div className="flex flex-col gap-1.5">
           <div className="flex justify-between">
             <label htmlFor="l-pass" className="text-ink-700 text-[13px] font-semibold">
@@ -59,15 +101,21 @@ export function LoginForm() {
           </div>
           <input
             id="l-pass"
+            name="password"
             type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            required
             className="border-input rounded-lg border px-3.5 py-[11px] text-sm"
           />
         </div>
         <button
           type="submit"
-          className="bg-primary text-primary-foreground mt-1 rounded-lg p-[13px] text-[15px] font-semibold"
+          disabled={submitting}
+          className="bg-primary text-primary-foreground mt-1 rounded-lg p-[13px] text-[15px] font-semibold disabled:opacity-60"
         >
-          Log in
+          {submitting ? "Logging in…" : "Log in"}
         </button>
       </form>
 

@@ -59,22 +59,41 @@ compiled CommonJS rather than raw TypeScript).
 - ✅ `HealthModule` (`GET /health`) — proves the full chain end-to-end by querying
   `organization.count()` through `@nextlayer/database`; verified returning live data
   from the seeded MySQL database
-- ⏳ DTOs, validation (class-validator or Zod), global exception filter — not done,
-  deferred until there are real endpoints to validate (Phase 4 auth will be first)
+- ✅ DTOs + validation (`class-validator`, global `ValidationPipe`) — landed with
+  Phase 4's auth endpoints (`RegisterDto`, `LoginDto`)
+- ⏳ Global exception filter, structured error response shape beyond Nest's default —
+  not done
 - ⏳ REST vs. GraphQL — still just the conservative REST default, no formal decision made
 - ⏳ API versioning strategy (`/api/v1/...`) — not applied yet, only `/` and `/health` exist
 - ⏳ Structured logging, request/response interceptors — not done
 
-## Phase 4 — Authentication
+## Phase 4 — Authentication — credential auth ✅ done, OAuth/SSO pending
 
-Built on Phases 2–3. Replaces the current demo-only Login/Register UI with real behavior.
-
-- Credential-based auth (hashed passwords, session or JWT strategy)
-- OAuth (Google, Microsoft) — the buttons already exist in the UI, currently inert
-- SSO/SAML + SCIM groundwork (mentioned on the Enterprise/Solutions marketing pages —
-  worth scoping now even if implementation lands later)
-- Password reset flow (the "Forgot password?" link is currently inert)
-- Session handling shared between marketing site (logged-out) and portal (logged-in)
+- ✅ Credential-based auth: `AuthModule` in `apps/api` (`POST /auth/register`,
+  `/auth/login`, `/auth/logout`, `GET /auth/me`), password hashing via Node's built-in
+  `crypto.scrypt` (no native-binding dependency, given the environment friction already
+  hit with Docker/mysql-cli on this machine)
+- ✅ Database-backed sessions (httpOnly, `SameSite=Lax` cookie), using the `Session`
+  table from Phase 2 — chosen over JWTs specifically so sessions are instantly
+  revocable (logout deletes the row; no blocklist infrastructure needed)
+- ✅ Registration also creates the user's `Organization` (from the existing "Company"
+  field), an `OWNER` `Membership`, and a 14-day `TRIALING` `Subscription` on the
+  Business plan — matching the FAQ's "every plan starts with a 14-day free trial" copy
+- ✅ Login/Register pages on the marketing site wired to the real API (previously
+  demo-only client state) — verified end-to-end in a real browser: register → account
+  created, duplicate email → 409 shown inline, wrong password → 401 shown inline,
+  correct login → success
+- ⏳ OAuth (Google, Microsoft) — buttons still inert; needs real client ID/secret from
+  each provider's developer console before they can be wired up
+- ⏳ SSO/SAML + SCIM — deferred until a real enterprise customer/IdP is in scope to
+  test against; the `SsoConnection` model from Phase 2 is the placeholder
+- ⏳ Password reset flow — the "Forgot password?" link is still inert
+- Note: `apps/web` and `apps/api` run on different ports/origins in dev
+  (`localhost:3000` / `:3001`) — cookies work because `SameSite=Lax` still permits
+  same-site (same host, different port) requests; CORS is configured with an explicit
+  origin + `credentials: true` on the API side (a wildcard origin can't be combined
+  with credentialed cookies). In production this needs `WEB_ORIGIN` set correctly and
+  ideally both apps under the same parent domain.
 
 ## Phase 5 — Wasabi Object Storage Integration
 
