@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import type { PortalOrganization, PortalUser } from "@/types/portal";
 import { PortalContext, type PortalContextValue } from "./portal-context";
-import { PortalHeader } from "./portal-header";
+import { PortalSidebar } from "./portal-sidebar";
 
 type LoadState =
   { status: "loading" } | { status: "ready"; value: PortalContextValue } | { status: "error" };
@@ -31,17 +31,25 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   if (state.status !== "ready") {
     return (
-      <div className="text-muted-foreground flex min-h-screen items-center justify-center text-sm">
-        Loading…
+      <div className="flex min-h-screen w-full">
+        <div className="border-border-subtle bg-surface-muted-2 h-screen w-[264px] shrink-0 animate-pulse border-r" />
+        <div className="flex-1 px-12 py-10">
+          <div className="bg-surface-muted h-7 w-40 animate-pulse rounded-lg" />
+          <div className="mt-8 grid grid-cols-4 gap-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="bg-surface-muted h-28 animate-pulse rounded-xl" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <PortalContext.Provider value={state.value}>
-      <div className="bg-background text-foreground min-h-screen w-full">
-        <PortalHeader />
-        <main className="mx-auto max-w-[1080px] px-10 py-10">{children}</main>
+      <div className="bg-background text-foreground flex min-h-screen w-full">
+        <PortalSidebar />
+        <main className="min-w-0 flex-1 px-12 py-10">{children}</main>
       </div>
     </PortalContext.Provider>
   );
