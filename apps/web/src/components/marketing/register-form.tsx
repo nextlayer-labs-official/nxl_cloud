@@ -105,7 +105,7 @@ export function RegisterForm() {
         />
         <FormField
           id="r-email"
-          label="Work email"
+          label="Email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -114,11 +114,11 @@ export function RegisterForm() {
         />
         <FormField
           id="r-company"
-          label="Company"
+          label="Workspace name (optional)"
           value={company}
           onChange={(e) => setCompany(e.target.value)}
           autoComplete="organization"
-          required
+          placeholder={name ? `${name}'s Workspace` : "Defaults to your name"}
         />
         <div className="flex flex-col gap-1.5">
           <label htmlFor="r-pass" className="text-ink-700 text-[13px] font-semibold">
@@ -164,7 +164,7 @@ export function RegisterForm() {
       </form>
 
       <div className="text-ink-550 mt-6 text-center text-[13px]">
-        Enterprise-grade security. SOC 2 Type II certified.
+        Your files stay private, encrypted, and yours.
       </div>
       <div className="mt-5 text-center text-sm">
         Already have an account? <Link href="/login">Log in</Link>

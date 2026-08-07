@@ -19,4 +19,18 @@ export class OrganizationsService {
     }
     return membership;
   }
+
+  async getUsage(userId: string) {
+    const membership = await this.getPrimaryMembership(userId);
+    const [usage, fileCount] = await Promise.all([
+      prisma.file.aggregate({
+        where: { organizationId: membership.organizationId, deletedAt: null },
+        _sum: { sizeBytes: true },
+      }),
+      prisma.file.count({
+        where: { organizationId: membership.organizationId, deletedAt: null },
+      }),
+    ]);
+    return { usedBytes: usage._sum.sizeBytes ?? 0, fileCount };
+  }
 }

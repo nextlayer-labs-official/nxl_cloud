@@ -14,6 +14,11 @@ export class FoldersController {
     return this.foldersService.listContents(req.user!.id, parentId);
   }
 
+  @Get("search")
+  search(@Req() req: Request, @Query("q") q?: string) {
+    return this.foldersService.search(req.user!.id, q ?? "");
+  }
+
   @Post()
   create(@Req() req: Request, @Body() dto: CreateFolderDto) {
     return this.foldersService.create(req.user!.id, dto);

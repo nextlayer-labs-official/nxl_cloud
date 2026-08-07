@@ -35,6 +35,47 @@ export class FoldersService {
     return { folders, files };
   }
 
+  /** Flat, org-wide name search across folders and files (not scoped to the current folder). */
+  async search(userId: string, query: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const q = query.trim();
+    if (!q) return { folders: [], files: [] };
+
+    const [folders, files] = await Promise.all([
+      prisma.folder.findMany({
+        where: { organizationId: membership.organizationId, name: { contains: q } },
+        include: { parent: { select: { name: true } } },
+        orderBy: { name: "asc" },
+        take: 25,
+      }),
+      prisma.file.findMany({
+        where: { organizationId: membership.organizationId, deletedAt: null, name: { contains: q } },
+        include: { folder: { select: { name: true } } },
+        orderBy: { name: "asc" },
+        take: 25,
+      }),
+    ]);
+
+    return {
+      folders: folders.map((f) => ({
+        id: f.id,
+        name: f.name,
+        parentId: f.parentId,
+        createdAt: f.createdAt,
+        parentName: f.parent?.name ?? "My Files",
+      })),
+      files: files.map((f) => ({
+        id: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        sizeBytes: f.sizeBytes,
+        folderId: f.folderId,
+        createdAt: f.createdAt,
+        parentName: f.folder?.name ?? "My Files",
+      })),
+    };
+  }
+
   async create(userId: string, dto: CreateFolderDto) {
     const membership = await this.organizations.getPrimaryMembership(userId);
 

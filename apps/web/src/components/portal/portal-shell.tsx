@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import type { PortalOrganization, PortalUser } from "@/types/portal";
@@ -8,26 +8,31 @@ import { PortalContext, type PortalContextValue } from "./portal-context";
 import { PortalSidebar } from "./portal-sidebar";
 
 type LoadState =
-  { status: "loading" } | { status: "ready"; value: PortalContextValue } | { status: "error" };
+  | { status: "loading" }
+  | { status: "ready"; value: Omit<PortalContextValue, "refresh"> }
+  | { status: "error" };
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
+  const fetchMe = useCallback(async () => {
+    const { user, organization } = await api.get<{
+      user: PortalUser;
+      organization: PortalOrganization;
+    }>("/auth/me");
+    setState({ status: "ready", value: { user, organization } });
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    api
-      .get<{ user: PortalUser; organization: PortalOrganization }>("/auth/me")
-      .then(({ user, organization }) => {
-        if (!cancelled) setState({ status: "ready", value: { user, organization } });
-      })
-      .catch(() => {
-        if (!cancelled) router.replace("/login");
-      });
+    fetchMe().catch(() => {
+      if (!cancelled) router.replace("/login");
+    });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [fetchMe, router]);
 
   if (state.status !== "ready") {
     return (
@@ -46,7 +51,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <PortalContext.Provider value={state.value}>
+    <PortalContext.Provider value={{ ...state.value, refresh: fetchMe }}>
       <div className="bg-background text-foreground flex min-h-screen w-full">
         <PortalSidebar />
         <main className="min-w-0 flex-1 px-12 py-10">{children}</main>

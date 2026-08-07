@@ -34,3 +34,8 @@ export interface BreadcrumbEntry {
   id: string;
   name: string;
 }
+
+export interface SearchResults {
+  folders: (FolderItem & { parentName: string })[];
+  files: (FileItem & { parentName: string })[];
+}

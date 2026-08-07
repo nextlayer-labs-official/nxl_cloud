@@ -12,6 +12,8 @@ import {
   Folder as FolderIcon,
   FolderPlus,
   Inbox,
+  Search,
+  SearchX,
   Share2,
   Trash2,
   Upload,
@@ -19,8 +21,9 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
 import { getFileIcon } from "@/lib/file-icons";
+import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { BreadcrumbEntry, FileItem, FolderItem } from "@/types/portal";
+import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/types/portal";
 import { FilePreviewModal } from "./file-preview-modal";
 
 const UPLOAD_FAILED_MESSAGE =
@@ -65,26 +68,6 @@ function summarizeUploads(uploads: UploadTask[]): string {
   return `${uploads.length} upload${uploads.length === 1 ? "" : "s"} complete`;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unitIndex]}`;
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
 interface FileBrowserProps {
   folderId?: string;
 }
@@ -105,7 +88,32 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
+  const [searching, setSearching] = useState(false);
   const dragCounter = useRef(0);
+  const isSearching = searchQuery.trim().length > 0;
+
+  const runSearch = useCallback((q: string) => {
+    if (!q) return;
+    setSearching(true);
+    api
+      .get<SearchResults>(`/folders/search?q=${encodeURIComponent(q)}`)
+      .then(setSearchResults)
+      .catch(() => setSearchResults({ folders: [], files: [] }))
+      .finally(() => setSearching(false));
+  }, []);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    const timer = setTimeout(() => runSearch(q), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, runSearch]);
 
   useEffect(() => {
     if (uploads.length === 0) return;
@@ -258,6 +266,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     try {
       await api.delete(`/files/${file.id}`);
       load();
+      if (isSearching) runSearch(searchQuery.trim());
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Couldn't delete the file.");
     }
@@ -269,6 +278,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     try {
       await api.delete(`/folders/${folder.id}`);
       load();
+      if (isSearching) runSearch(searchQuery.trim());
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Couldn't delete the folder.");
     }
@@ -315,11 +325,30 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             ))}
           </div>
           <h1 className="text-foreground text-[26px] font-bold tracking-[-0.01em]">
-            {pageTitle}
+            {isSearching ? `Search results for "${searchQuery.trim()}"` : pageTitle}
           </h1>
         </div>
 
         <div className="flex items-center gap-2.5 pt-1">
+          <div className="relative">
+            <Search className="text-ink-400 pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search files and folders…"
+              className="border-input bg-background w-56 rounded-lg border py-2 pr-3 pl-9 text-sm outline-none focus:w-72 transition-[width]"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear search"
+                className="text-ink-450 hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer p-0.5"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setCreatingFolder(true)}
@@ -415,7 +444,135 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
         </div>
       )}
 
-      {loading ? (
+      {isSearching ? (
+        searching && !searchResults ? (
+          <div className="bg-surface-muted h-56 animate-pulse rounded-xl" />
+        ) : !searchResults ||
+          (searchResults.folders.length === 0 && searchResults.files.length === 0) ? (
+          <div className="border-border-subtle flex flex-col items-center rounded-xl border border-dashed py-20 text-center">
+            <div className="bg-surface-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+              <SearchX className="text-ink-400 h-6 w-6" />
+            </div>
+            <p className="text-foreground text-[15px] font-semibold">No results found</p>
+            <p className="text-ink-450 mt-1 text-sm">Try a different name or check your spelling.</p>
+          </div>
+        ) : (
+          <>
+            {searchResults.folders.length > 0 && (
+              <div className="mb-8">
+                <h2 className="text-ink-450 mb-3 text-xs font-semibold tracking-wide uppercase">
+                  Folders
+                </h2>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {searchResults.folders.map((folder) => (
+                    <Link
+                      key={folder.id}
+                      href={`/portal/folder/${folder.id}`}
+                      onClick={() => setSearchQuery("")}
+                      className="border-border-subtle bg-background hover:border-border-strong flex items-center gap-3 rounded-xl border p-4 transition"
+                    >
+                      <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                        <FolderIcon className="text-accent-foreground h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-foreground truncate text-[14px] font-medium">
+                          {folder.name}
+                        </div>
+                        <div className="text-ink-450 truncate text-[12px]">
+                          in {folder.parentName}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {searchResults.files.length > 0 && (
+              <div>
+                <h2 className="text-ink-450 mb-3 text-xs font-semibold tracking-wide uppercase">
+                  Files
+                </h2>
+                <div className="border-border-subtle overflow-hidden rounded-xl border">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-border-subtle bg-surface-muted-2 border-b">
+                        <th className="text-ink-450 px-5 py-2.5 text-xs font-semibold tracking-wide uppercase">
+                          Name
+                        </th>
+                        <th className="text-ink-450 hidden px-5 py-2.5 text-xs font-semibold tracking-wide uppercase sm:table-cell">
+                          Location
+                        </th>
+                        <th className="text-ink-450 hidden px-5 py-2.5 text-xs font-semibold tracking-wide uppercase md:table-cell">
+                          Size
+                        </th>
+                        <th className="px-5 py-2.5" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {searchResults.files.map((file) => {
+                        const Icon = getFileIcon(file.mimeType);
+                        return (
+                          <tr
+                            key={file.id}
+                            className="group border-border-subtle hover:bg-surface-muted-2 border-b last:border-b-0"
+                          >
+                            <td
+                              className="cursor-pointer px-5 py-3"
+                              onClick={() => setPreviewFile(file)}
+                            >
+                              <div className="flex items-center gap-3">
+                                <Icon className="text-ink-400 h-[18px] w-[18px] shrink-0" />
+                                <span className="text-foreground truncate text-[14px] font-medium hover:underline">
+                                  {file.name}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap sm:table-cell">
+                              {file.parentName}
+                            </td>
+                            <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap md:table-cell">
+                              {formatBytes(file.sizeBytes)}
+                            </td>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownload(file)}
+                                  className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
+                                  aria-label={`Download ${file.name}`}
+                                >
+                                  <Download className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleShare(file)}
+                                  className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
+                                  aria-label={`Share ${file.name}`}
+                                >
+                                  <Share2 className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteFile(file)}
+                                  className="text-ink-400 hover:text-error-text hover:bg-background cursor-pointer rounded-md p-1.5"
+                                  aria-label={`Delete ${file.name}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )
+      ) : loading ? (
         <div>
           <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (

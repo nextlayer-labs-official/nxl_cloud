@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Folder, LogOut } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Folder, LogOut, Settings } from "lucide-react";
 import { api } from "@/lib/api-client";
+import { formatBytes } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { usePortal } from "./portal-context";
 
 function initials(name: string): string {
@@ -13,16 +16,18 @@ function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  OWNER: "Owner",
-  ADMIN: "Admin",
-  MEMBER: "Member",
-  VIEWER: "Viewer",
-};
-
 export function PortalSidebar() {
   const { user, organization } = usePortal();
   const router = useRouter();
+  const pathname = usePathname();
+  const [usedBytes, setUsedBytes] = useState<number | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ usedBytes: number }>("/organizations/usage")
+      .then(({ usedBytes }) => setUsedBytes(usedBytes))
+      .catch(() => {});
+  }, []);
 
   async function handleLogout() {
     await api.post("/auth/logout").catch(() => {});
@@ -44,7 +49,7 @@ export function PortalSidebar() {
             {organization.name}
           </div>
           <div className="text-ink-450 text-[11px]">
-            {ROLE_LABEL[organization.role] ?? organization.role}
+            {usedBytes === null ? "—" : `${formatBytes(usedBytes)} used`}
           </div>
         </div>
       </div>
@@ -52,10 +57,27 @@ export function PortalSidebar() {
       <nav className="mt-6 flex flex-col gap-0.5">
         <Link
           href="/portal"
-          className="bg-accent text-accent-foreground flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold"
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold",
+            pathname === "/portal" || pathname.startsWith("/portal/folder")
+              ? "bg-accent text-accent-foreground"
+              : "text-ink-600 hover:bg-background",
+          )}
         >
           <Folder className="h-4 w-4" />
           My Files
+        </Link>
+        <Link
+          href="/portal/settings"
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold",
+            pathname === "/portal/settings"
+              ? "bg-accent text-accent-foreground"
+              : "text-ink-600 hover:bg-background",
+          )}
+        >
+          <Settings className="h-4 w-4" />
+          Settings
         </Link>
       </nav>
 

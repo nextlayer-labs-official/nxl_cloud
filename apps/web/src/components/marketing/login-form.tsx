@@ -112,7 +112,7 @@ export function LoginForm() {
       </form>
 
       <div className="text-ink-550 mt-6 text-center text-[13px]">
-        Enterprise-grade security. SOC 2 Type II certified.
+        Your files stay private, encrypted, and yours.
       </div>
       <div className="mt-5 text-center text-sm">
         Don&apos;t have an account? <Link href="/register">Sign up</Link>

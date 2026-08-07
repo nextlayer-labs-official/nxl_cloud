@@ -2,8 +2,13 @@ import { randomBytes } from "node:crypto";
 import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import type { Request } from "express";
+import { OrganizationsService } from "../organizations/organizations.service";
+import { StorageService } from "../storage/storage.service";
+import type { ChangePasswordDto } from "./dto/change-password.dto";
+import type { DeleteAccountDto } from "./dto/delete-account.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RegisterDto } from "./dto/register.dto";
+import type { UpdateProfileDto } from "./dto/update-profile.dto";
 import { hashPassword, verifyPassword } from "./password.util";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -29,6 +34,11 @@ function toSafeUser(user: { id: string; email: string; name: string; avatarUrl: 
 
 @Injectable()
 export class AuthService {
+  constructor(
+    private readonly organizations: OrganizationsService,
+    private readonly storage: StorageService,
+  ) {}
+
   async register(dto: RegisterDto, req: Request) {
     const email = dto.email.toLowerCase().trim();
 
@@ -39,7 +49,9 @@ export class AuthService {
 
     const passwordHash = await hashPassword(dto.password);
 
-    const baseSlug = slugify(dto.company) || "org";
+    // Solo/personal workspace by default — a company name is optional, not required.
+    const workspaceName = dto.company?.trim() || `${dto.name}'s Workspace`;
+    const baseSlug = slugify(workspaceName) || "workspace";
     let slug = baseSlug;
     let suffix = 0;
     while (await prisma.organization.findUnique({ where: { slug } })) {
@@ -56,7 +68,7 @@ export class AuthService {
         data: { name: dto.name, email, passwordHash },
       });
       const organization = await tx.organization.create({
-        data: { name: dto.company, slug },
+        data: { name: workspaceName, slug },
       });
       await tx.membership.create({
         data: { userId: user.id, organizationId: organization.id, role: "OWNER" },
@@ -113,5 +125,54 @@ export class AuthService {
   async logout(token: string | undefined) {
     if (!token) return;
     await prisma.session.deleteMany({ where: { sessionToken: token } });
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const data: { name?: string; email?: string } = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.email !== undefined) {
+      const email = dto.email.toLowerCase().trim();
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing && existing.id !== userId) {
+        throw new ConflictException("An account with this email already exists.");
+      }
+      data.email = email;
+    }
+    const user = await prisma.user.update({ where: { id: userId }, data });
+    return { user: toSafeUser(user) };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.passwordHash || !(await verifyPassword(dto.currentPassword, user.passwordHash))) {
+      throw new UnauthorizedException("Current password is incorrect.");
+    }
+    const passwordHash = await hashPassword(dto.newPassword);
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  }
+
+  /**
+   * Personal workspace = one user per org, so deleting the account deletes the
+   * whole workspace. Order matters: collect storage keys and delete the
+   * Organization (which cascades Folder/File/FileVersion/etc. in the DB) before
+   * removing the Wasabi objects, then delete the User row last — by that point
+   * nothing non-cascading (Folder.createdBy, File.uploadedBy, ...) still
+   * references it, since those rows were org-scoped and are already gone.
+   */
+  async deleteAccount(userId: string, dto: DeleteAccountDto) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.passwordHash || !(await verifyPassword(dto.password, user.passwordHash))) {
+      throw new UnauthorizedException("Password is incorrect.");
+    }
+
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const files = await prisma.file.findMany({
+      where: { organizationId: membership.organizationId },
+      select: { storageKey: true },
+    });
+
+    await prisma.organization.delete({ where: { id: membership.organizationId } });
+    await Promise.all(files.map((f) => this.storage.deleteObject(f.storageKey)));
+    await prisma.user.delete({ where: { id: userId } });
   }
 }

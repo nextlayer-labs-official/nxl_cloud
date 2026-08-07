@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -12,8 +14,11 @@ import {
 import type { Request, Response } from "express";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { AuthService } from "./auth.service";
+import { ChangePasswordDto } from "./dto/change-password.dto";
+import { DeleteAccountDto } from "./dto/delete-account.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
+import { UpdateProfileDto } from "./dto/update-profile.dto";
 import { SESSION_COOKIE, SessionGuard } from "./guards/session.guard";
 
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -70,6 +75,32 @@ export class AuthController {
         role: membership.role,
       },
     };
+  }
+
+  @Patch("me")
+  @UseGuards(SessionGuard)
+  updateProfile(@Req() req: Request, @Body() dto: UpdateProfileDto) {
+    return this.authService.updateProfile(req.user!.id, dto);
+  }
+
+  @Post("change-password")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionGuard)
+  async changePassword(@Req() req: Request, @Body() dto: ChangePasswordDto) {
+    await this.authService.changePassword(req.user!.id, dto);
+    return { success: true };
+  }
+
+  @Delete("me")
+  @UseGuards(SessionGuard)
+  async deleteAccount(
+    @Req() req: Request,
+    @Body() dto: DeleteAccountDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.deleteAccount(req.user!.id, dto);
+    res.clearCookie(SESSION_COOKIE, { path: "/" });
+    return { success: true };
   }
 
   private setSessionCookie(res: Response, token: string) {
