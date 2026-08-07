@@ -25,7 +25,7 @@ export class FilesService {
     const membership = await this.organizations.getPrimaryMembership(userId);
     await this.assertFolderInOrg(dto.folderId, membership.organizationId);
 
-    const storageKey = this.storage.buildKey(membership.organizationId, dto.name);
+    const storageKey = this.storage.buildKey(membership.organization.slug, dto.name);
     const uploadUrl = await this.storage.getUploadUrl(storageKey, dto.mimeType);
 
     return { uploadUrl, storageKey };

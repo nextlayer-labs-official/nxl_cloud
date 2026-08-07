@@ -35,9 +35,14 @@ export class StorageService {
     });
   }
 
-  /** Builds a storage key namespaced by org, so listing/cleanup can scope by prefix. */
-  buildKey(organizationId: string, fileName: string): string {
-    return `org/${organizationId}/${randomUUID()}-${fileName}`;
+  /**
+   * Builds a storage key namespaced by the org's own slug, so each account
+   * shows up as its own clearly-named top-level folder when browsing the
+   * bucket directly (e.g. in the Wasabi console) — not nested under one
+   * shared "org/" prefix with an opaque id.
+   */
+  buildKey(orgSlug: string, fileName: string): string {
+    return `${orgSlug}/${randomUUID()}-${fileName}`;
   }
 
   async getUploadUrl(key: string, contentType: string): Promise<string> {
