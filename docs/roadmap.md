@@ -96,23 +96,31 @@ compiled CommonJS rather than raw TypeScript).
   with credentialed cookies). In production this needs `WEB_ORIGIN` set correctly and
   ideally both apps under the same parent domain.
 
-## Phase 5 — Wasabi Object Storage Integration — code ✅ done, unverified against real Wasabi
+## Phase 5 — Wasabi Object Storage Integration ✅ done, verified against real Wasabi
 
 - ✅ `StorageService` (`apps/api`) wraps `@aws-sdk/client-s3` +
   `@aws-sdk/s3-request-presigner` — Wasabi is fully S3-compatible, so the standard
   AWS SDK works against it with a custom `endpoint`
 - ✅ Upload/download presigned URLs, best-effort delete (storage errors don't block
   DB cleanup — logged, not thrown)
-- ✅ File metadata fully wired to `File`/`FileVersion`/`Folder` — verified via curl
-  against real MySQL (only the actual Wasabi network calls are unverified, since we
-  don't have real credentials yet; presigning itself is local crypto and works
-  against placeholder credentials, so that part _was_ verified)
+- ✅ **Fully verified against a real Wasabi bucket**: presigned PUT upload,
+  byte-exact download round-trip, share-link creation + public resolution, and
+  delete (confirmed the object actually disappears from the bucket, not just the
+  DB row) — all tested via curl and then again through the real browser UI
+  (upload → share → public `/share/[token]` page in a logged-out context)
 - ⏳ Storage quota tracking — not done, deferred to Phase 7 (Billing) where it
   actually matters
-- Note: the bucket needs a **CORS policy** allowing `PUT` from `WEB_ORIGIN`, since
-  the browser uploads directly to Wasabi via the presigned URL — see the comment in
-  `.env.example`. Without it, uploads fail at the browser's CORS preflight, which
-  surfaces in the portal as a generic "Upload to storage failed" error.
+- Note: real Wasabi credentials require **region-specific endpoints**
+  (`s3.<region>.wasabisys.com`, not the generic `s3.wasabisys.com`) — using the
+  generic endpoint for a non-`us-east-1` bucket causes auth failures even with
+  correct keys.
+- Note: a Wasabi **sub-user** API key has zero bucket access by default —
+  `AccessDenied` even with a correctly-signed request and a real, existing bucket
+  almost always means the sub-user needs a policy attached (Wasabi Console → Users
+  → the sub-user → Policies) granting it access to that specific bucket. This is
+  separate from the bucket's own ACL/"Quick Settings" (which controls public
+  access, not per-user permissions) — don't make the bucket public to work around
+  this.
 
 ## Phase 6 — Customer Portal (Frontend) — MVP ✅ done
 
