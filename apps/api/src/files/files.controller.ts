@@ -25,6 +25,11 @@ export class FilesController {
     return this.filesService.getDownloadUrl(req.user!.id, id);
   }
 
+  @Get(":id/preview-url")
+  getPreviewUrl(@Req() req: Request, @Param("id") id: string) {
+    return this.filesService.getPreviewUrl(req.user!.id, id);
+  }
+
   @Delete(":id")
   async remove(@Req() req: Request, @Param("id") id: string) {
     await this.filesService.remove(req.user!.id, id);

@@ -54,12 +54,12 @@ export class StorageService {
     return getSignedUrl(this.client, command, { expiresIn: UPLOAD_URL_TTL_SECONDS });
   }
 
-  async getDownloadUrl(key: string, downloadName?: string): Promise<string> {
+  async getDownloadUrl(key: string, downloadName?: string, inline = false): Promise<string> {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
       ResponseContentDisposition: downloadName
-        ? `attachment; filename="${downloadName}"`
+        ? `${inline ? "inline" : "attachment"}; filename="${downloadName}"`
         : undefined,
     });
     return getSignedUrl(this.client, command, { expiresIn: DOWNLOAD_URL_TTL_SECONDS });

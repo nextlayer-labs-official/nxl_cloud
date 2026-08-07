@@ -75,6 +75,13 @@ export class FilesService {
     return { downloadUrl };
   }
 
+  /** Same object, but `Content-Disposition: inline` so the browser renders it (img/iframe/etc) instead of downloading. */
+  async getPreviewUrl(userId: string, fileId: string) {
+    const file = await this.getOwnedFile(userId, fileId);
+    const previewUrl = await this.storage.getDownloadUrl(file.storageKey, file.name, true);
+    return { previewUrl };
+  }
+
   async remove(userId: string, fileId: string) {
     const file = await this.getOwnedFile(userId, fileId);
     await prisma.file.update({ where: { id: file.id }, data: { deletedAt: new Date() } });

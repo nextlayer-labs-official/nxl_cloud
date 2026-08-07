@@ -21,6 +21,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { getFileIcon } from "@/lib/file-icons";
 import { cn } from "@/lib/utils";
 import type { BreadcrumbEntry, FileItem, FolderItem } from "@/types/portal";
+import { FilePreviewModal } from "./file-preview-modal";
 
 const UPLOAD_FAILED_MESSAGE =
   "Upload to storage failed. If Wasabi credentials aren't configured yet (or the bucket's CORS policy doesn't allow this origin), this is expected.";
@@ -103,6 +104,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   const [newFolderName, setNewFolderName] = useState("");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const dragCounter = useRef(0);
 
   useEffect(() => {
@@ -506,10 +508,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                           key={file.id}
                           className="group border-border-subtle hover:bg-surface-muted-2 border-b last:border-b-0"
                         >
-                          <td className="px-5 py-3">
+                          <td className="cursor-pointer px-5 py-3" onClick={() => setPreviewFile(file)}>
                             <div className="flex items-center gap-3">
                               <Icon className="text-ink-400 h-[18px] w-[18px] shrink-0" />
-                              <span className="text-foreground truncate text-[14px] font-medium">
+                              <span className="text-foreground truncate text-[14px] font-medium hover:underline">
                                 {file.name}
                               </span>
                               <span className="text-ink-450 text-[13px] sm:hidden">
@@ -638,6 +640,14 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             </ul>
           )}
         </div>
+      )}
+
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+          onDownload={() => handleDownload(previewFile)}
+        />
       )}
     </div>
   );

@@ -25,3 +25,14 @@ export function getFileIcon(mimeType: string): LucideIcon {
   const match = RULES.find((rule) => rule.test.test(mimeType));
   return match?.icon ?? FileIcon;
 }
+
+export type PreviewKind = "image" | "pdf" | "text" | "video" | "audio" | "none";
+
+export function getPreviewKind(mimeType: string): PreviewKind {
+  if (/^image\//.test(mimeType)) return "image";
+  if (/^video\//.test(mimeType)) return "video";
+  if (/^audio\//.test(mimeType)) return "audio";
+  if (mimeType === "application/pdf") return "pdf";
+  if (/^text\/|json|javascript|typescript|xml/.test(mimeType)) return "text";
+  return "none";
+}
