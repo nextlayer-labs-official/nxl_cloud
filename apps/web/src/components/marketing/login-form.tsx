@@ -2,15 +2,16 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormField } from "@/components/common/form-field";
 import { API_URL } from "@/constants/site";
 
 export function LoginForm() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -27,24 +28,15 @@ export function LoginForm() {
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setError(body?.message ?? "Incorrect email or password.");
+        setSubmitting(false);
         return;
       }
 
-      setSuccess(true);
+      router.push("/portal");
     } catch {
       setError("Couldn't reach the server. Please try again.");
-    } finally {
       setSubmitting(false);
     }
-  }
-
-  if (success) {
-    return (
-      <>
-        <h1 className="mb-2 text-center text-2xl font-bold tracking-[-0.02em]">Welcome back</h1>
-        <p className="text-muted-foreground text-center text-sm">You&apos;re logged in.</p>
-      </>
-    );
   }
 
   return (

@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { OrganizationsService } from "../organizations/organizations.service";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
@@ -19,7 +20,10 @@ const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly organizations: OrganizationsService,
+  ) {}
 
   @Post("register")
   async register(
@@ -55,8 +59,17 @@ export class AuthController {
 
   @Get("me")
   @UseGuards(SessionGuard)
-  me(@Req() req: Request) {
-    return { user: req.user };
+  async me(@Req() req: Request) {
+    const membership = await this.organizations.getPrimaryMembership(req.user!.id);
+    return {
+      user: req.user,
+      organization: {
+        id: membership.organization.id,
+        name: membership.organization.name,
+        slug: membership.organization.slug,
+        role: membership.role,
+      },
+    };
   }
 
   private setSessionCookie(res: Response, token: string) {

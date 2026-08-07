@@ -7,11 +7,11 @@ placeholder components until real product screenshots/photos are supplied.
 
 ## 1. Layout shells (3 variants, no single universal layout)
 
-| Shell | Used by | Header | Footer | Notes |
-|---|---|---|---|---|
+| Shell         | Used by                                                                                     | Header                                                    | Footer                                | Notes                                                       |
+| ------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
 | **Marketing** | Home, Features, Solutions, Enterprise, Pricing, About, Blog, Contact, Partners, FAQ, Status | Sticky, full nav, collapses to "Menu" button under 1180px | `full` (Home only) or `simple` (rest) | Home also gets the SOC 2 `AnnouncementBar` above the header |
-| **Auth** | Login, Register | Wordmark only, no nav | none | Centered card on radial-gradient background |
-| **Legal** | Privacy, Terms | Wordmark + "Back to home" | `legal` (centered, single line) | Sticky sidebar table-of-contents + `#anchor` sections |
+| **Auth**      | Login, Register                                                                             | Wordmark only, no nav                                     | none                                  | Centered card on radial-gradient background                 |
+| **Legal**     | Privacy, Terms                                                                              | Wordmark + "Back to home"                                 | `legal` (centered, single line)       | Sticky sidebar table-of-contents + `#anchor` sections       |
 
 Route groups mirror this: `app/(marketing)/`, `app/(auth)/`, `app/(legal)/`. Route groups don't
 require their own `layout.tsx` here — the variance in nav set and footer variant per page is high
@@ -24,14 +24,14 @@ abstraction that would immediately need escape hatches.
 
 Nav links differ by section, not globally:
 
-| Nav group | Pages | Links |
-|---|---|---|
-| `product` | Home, Features, Solutions, Enterprise, Pricing | Features, Solutions, Security\*, Enterprise, Pricing, Developers\* |
-| `resources` | Blog, About, FAQ (variant) | Features, Resources\*, Blog, About, Pricing |
-| `support` | Contact, FAQ | Features, Pricing, FAQ, Contact |
-| `company` | About | Features, Blog, About, Careers\*, Contact |
-| `partners` | Partners | Features, Solutions, Developers\*, Partners, Pricing |
-| `status` | Status | Features, Documentation\*, Status, Contact |
+| Nav group   | Pages                                          | Links                                                              |
+| ----------- | ---------------------------------------------- | ------------------------------------------------------------------ |
+| `product`   | Home, Features, Solutions, Enterprise, Pricing | Features, Solutions, Security\*, Enterprise, Pricing, Developers\* |
+| `resources` | Blog, About, FAQ (variant)                     | Features, Resources\*, Blog, About, Pricing                        |
+| `support`   | Contact, FAQ                                   | Features, Pricing, FAQ, Contact                                    |
+| `company`   | About                                          | Features, Blog, About, Careers\*, Contact                          |
+| `partners`  | Partners                                       | Features, Solutions, Developers\*, Partners, Pricing               |
+| `status`    | Status                                         | Features, Documentation\*, Status, Contact                         |
 
 (\* = page not in export; link renders but points to `#`, per your call on 2026-08-06.)
 
@@ -58,23 +58,23 @@ To build in Step 3/4, each backing a pattern repeated across ≥2 pages:
 
 ## 4. Page-by-page route map
 
-| Route | Source file | Shell | Unique interactive state |
-|---|---|---|---|
-| `/` | Home.dc.html | Marketing (full footer) | announcement dismiss, mobile menu, FAQ accordion |
-| `/features` | Features.dc.html | Marketing | mobile menu, sticky in-page section nav |
-| `/solutions` | Solutions.dc.html | Marketing | mobile menu, audience segment switch |
-| `/enterprise` | Enterprise.dc.html | Marketing | mobile menu, contact form (uncontrolled visual only) |
-| `/pricing` | Pricing.dc.html | Marketing | mobile menu, monthly/annual toggle, FAQ accordion |
-| `/about` | About.dc.html | Marketing | mobile menu |
-| `/blog` | Blog.dc.html | Marketing | mobile menu, category filter |
-| `/contact` | Contact.dc.html | Marketing | mobile menu, intent switch, submit → success state |
-| `/partners` | Partners.dc.html | Marketing | mobile menu |
-| `/faq` | FAQ.dc.html | Marketing | mobile menu, search filter, accordion |
-| `/status` | Status.dc.html | Marketing | none (static) |
-| `/privacy` | Privacy.dc.html | Legal | none (static, TOC anchors) |
-| `/terms` | Terms.dc.html | Legal | none (static, TOC anchors) |
-| `/login` | Login.dc.html | Auth | error-state demo button |
-| `/register` | Register.dc.html | Auth | password-strength meter |
+| Route         | Source file        | Shell                   | Unique interactive state                             |
+| ------------- | ------------------ | ----------------------- | ---------------------------------------------------- |
+| `/`           | Home.dc.html       | Marketing (full footer) | announcement dismiss, mobile menu, FAQ accordion     |
+| `/features`   | Features.dc.html   | Marketing               | mobile menu, sticky in-page section nav              |
+| `/solutions`  | Solutions.dc.html  | Marketing               | mobile menu, audience segment switch                 |
+| `/enterprise` | Enterprise.dc.html | Marketing               | mobile menu, contact form (uncontrolled visual only) |
+| `/pricing`    | Pricing.dc.html    | Marketing               | mobile menu, monthly/annual toggle, FAQ accordion    |
+| `/about`      | About.dc.html      | Marketing               | mobile menu                                          |
+| `/blog`       | Blog.dc.html       | Marketing               | mobile menu, category filter                         |
+| `/contact`    | Contact.dc.html    | Marketing               | mobile menu, intent switch, submit → success state   |
+| `/partners`   | Partners.dc.html   | Marketing               | mobile menu                                          |
+| `/faq`        | FAQ.dc.html        | Marketing               | mobile menu, search filter, accordion                |
+| `/status`     | Status.dc.html     | Marketing               | none (static)                                        |
+| `/privacy`    | Privacy.dc.html    | Legal                   | none (static, TOC anchors)                           |
+| `/terms`      | Terms.dc.html      | Legal                   | none (static, TOC anchors)                           |
+| `/login`      | Login.dc.html      | Auth                    | error-state demo button                              |
+| `/register`   | Register.dc.html   | Auth                    | password-strength meter                              |
 
 ## 5. Content strategy
 

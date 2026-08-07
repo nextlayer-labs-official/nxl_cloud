@@ -8,6 +8,7 @@ All 14 source pages rebuilt in Next.js 15 + Tailwind v4 + shadcn/ui, pixel-match
 design export, plus 5 stub pages for nav/footer links that had no source design.
 
 **Loose ends — status:**
+
 - ✅ Removed unused `create-next-app` scaffold files (`public/*.svg`, default `favicon.ico`)
 - ✅ Branded favicon (`icon.svg`), `apple-icon`, and Open Graph/Twitter images (generated via
   `next/og`, brand-blue monogram)
@@ -95,25 +96,58 @@ compiled CommonJS rather than raw TypeScript).
   with credentialed cookies). In production this needs `WEB_ORIGIN` set correctly and
   ideally both apps under the same parent domain.
 
-## Phase 5 — Wasabi Object Storage Integration
+## Phase 5 — Wasabi Object Storage Integration — code ✅ done, unverified against real Wasabi
 
-Needed before the portal can do anything real with files.
+- ✅ `StorageService` (`apps/api`) wraps `@aws-sdk/client-s3` +
+  `@aws-sdk/s3-request-presigner` — Wasabi is fully S3-compatible, so the standard
+  AWS SDK works against it with a custom `endpoint`
+- ✅ Upload/download presigned URLs, best-effort delete (storage errors don't block
+  DB cleanup — logged, not thrown)
+- ✅ File metadata fully wired to `File`/`FileVersion`/`Folder` — verified via curl
+  against real MySQL (only the actual Wasabi network calls are unverified, since we
+  don't have real credentials yet; presigning itself is local crypto and works
+  against placeholder credentials, so that part _was_ verified)
+- ⏳ Storage quota tracking — not done, deferred to Phase 7 (Billing) where it
+  actually matters
+- Note: the bucket needs a **CORS policy** allowing `PUT` from `WEB_ORIGIN`, since
+  the browser uploads directly to Wasabi via the presigned URL — see the comment in
+  `.env.example`. Without it, uploads fail at the browser's CORS preflight, which
+  surfaces in the portal as a generic "Upload to storage failed" error.
 
-- Wasabi bucket setup, S3-compatible SDK integration in the NestJS backend
-- Upload/download/delete primitives, presigned URLs
-- File metadata sync with the `File`/`Folder` Prisma models
-- Storage quota tracking (ties into Billing in Phase 7)
+## Phase 6 — Customer Portal (Frontend) — MVP ✅ done
 
-## Phase 6 — Customer Portal (Frontend)
+Scoped deliberately to a working core rather than the full roadmap breadth below —
+see the "not done" list for what's left.
 
-This is where every "product UI placeholder" box on the marketing site becomes real.
-
-- App shell separate from the marketing site (likely `app/(portal)/` route group,
-  authenticated layout, different nav)
-- File browser, previews, upload UI
-- Sharing & permissions UI (role-based, matching what Features/Solutions pages promise)
-- Team spaces, activity feed, version history
-- Admin-facing settings within a user's own org (SSO config, audit log export)
+- ✅ `apps/web/src/app/portal/` — auth-gated shell (`PortalShell`, client-side
+  `/auth/me` check, redirects to `/login` on 401), portal header showing org name +
+  user + logout
+- ✅ File browser: nested folder navigation with full breadcrumb trail, create
+  folder, upload (direct-to-Wasabi via presigned URL), download, per-file share
+  link, delete (files and empty folders)
+- ✅ Public `/share/[token]` page — resolves a share link with no auth required
+- ✅ Login/Register now redirect to `/portal` on success (previously showed static
+  "you're logged in" text, since there was nowhere real to send them before this)
+- ✅ Verified end-to-end in a real browser: register → land in empty portal → create
+  folder → navigate in/out via breadcrumb → delete folder → logout → confirm direct
+  `/portal` access redirects to `/login` when logged out. Upload verified to fail
+  _gracefully_ (clear error, no crash) given placeholder Wasabi credentials — full
+  upload/download only provable once real credentials exist.
+- ⏳ File previews — not done (download-only for now)
+- ⏳ Comments — schema exists (`Comment` model), no UI
+- ⏳ Team spaces UI — schema exists (`Team`/`TeamMembership`), folders can be
+  team-scoped in the data model, but the portal has no team switcher/assignment UI
+- ⏳ Activity feed — `AuditLog` isn't even being written to yet by the files/folders
+  endpoints (only auth writes one row on registration); needs both the write side
+  and a feed UI
+- ⏳ Version history UI — `FileVersion` rows are created on upload, but there's no
+  UI to view/restore past versions (currently always version 1, since re-uploading
+  a same-named file just creates a new `File` row rather than a new version)
+- ⏳ Admin console (SSO config, audit log export, org-wide settings) — none of this
+  exists yet
+- ⏳ Granular per-file/folder `Permission` model — currently every org member has
+  full access to everything in their org; the `Permission` table from Phase 2 isn't
+  consulted anywhere yet
 
 ## Phase 7 — Billing & Subscription
 

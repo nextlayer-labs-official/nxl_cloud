@@ -46,9 +46,20 @@ The Prisma schema lives in `packages/database/prisma/schema.prisma`. Common comm
 
 ```bash
 npm run db:generate        # regenerate the Prisma client after a schema change
-npm run db:migrate         # create + apply a migration
+npm run db:migrate         # create + apply a migration (prompts for a name interactively)
 npm run db:seed            # re-run the seed script
 npm run db:studio          # open Prisma Studio
+```
+
+For a **named** migration, run Prisma directly from `packages/database` instead —
+npm's argument forwarding through nested `--workspace` calls doesn't reliably pass
+`-- --name` through, and prisma will just hang waiting for interactive input:
+
+```bash
+cd packages/database
+npx prisma migrate dev --name your_migration_name
+cd ../..
+npm run db:generate        # rebuild the client apps/api imports
 ```
 
 ## Linting & Formatting

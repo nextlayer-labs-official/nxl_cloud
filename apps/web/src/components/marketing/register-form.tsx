@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormField } from "@/components/common/form-field";
 import { API_URL } from "@/constants/site";
 
@@ -16,6 +17,7 @@ function computeStrength(value: string) {
 }
 
 export function RegisterForm() {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
@@ -23,7 +25,6 @@ export function RegisterForm() {
   const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
   const strength = computeStrength(password);
 
@@ -49,27 +50,15 @@ export function RegisterForm() {
         const body = await res.json().catch(() => null);
         const message = Array.isArray(body?.message) ? body.message[0] : body?.message;
         setError(message ?? "Something went wrong. Please try again.");
+        setSubmitting(false);
         return;
       }
 
-      setSuccess(true);
+      router.push("/portal");
     } catch {
       setError("Couldn't reach the server. Please try again.");
-    } finally {
       setSubmitting(false);
     }
-  }
-
-  if (success) {
-    return (
-      <>
-        <h1 className="mb-2 text-center text-2xl font-bold tracking-[-0.02em]">Account created</h1>
-        <p className="text-muted-foreground text-center text-sm">
-          Welcome to Nextlayer Cloud, {name.split(" ")[0] || "there"}. Your 14-day trial has
-          started.
-        </p>
-      </>
-    );
   }
 
   return (
