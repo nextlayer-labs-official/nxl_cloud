@@ -20,7 +20,8 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "stripe": "^22.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^9",

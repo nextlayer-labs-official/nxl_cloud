@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { AuthModule } from "./auth/auth.module";
+import { BillingModule } from "./billing/billing.module";
 import { FilesModule } from "./files/files.module";
 import { FoldersModule } from "./folders/folders.module";
 import { HealthModule } from "./health/health.module";
@@ -18,6 +19,7 @@ import { StorageModule } from "./storage/storage.module";
     FoldersModule,
     FilesModule,
     ShareModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

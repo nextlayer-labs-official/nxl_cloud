@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -10,9 +11,7 @@ import {
   ChevronUp,
   Download,
   Folder as FolderIcon,
-  FolderPlus,
   Inbox,
-  Search,
   SearchX,
   Share2,
   Trash2,
@@ -24,7 +23,10 @@ import { getFileIcon } from "@/lib/file-icons";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/types/portal";
+import { useRegisterBrowserActions } from "./browser-actions-context";
 import { FilePreviewModal } from "./file-preview-modal";
+import { NewFolderModal } from "./new-folder-modal";
+import { ShareModal } from "./share-modal";
 
 const UPLOAD_FAILED_MESSAGE =
   "Upload to storage failed. If Wasabi credentials aren't configured yet (or the bucket's CORS policy doesn't allow this origin), this is expected.";
@@ -84,15 +86,30 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   const [uploads, setUploads] = useState<UploadTask[]>([]);
   const [uploadsCollapsed, setUploadsCollapsed] = useState(false);
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [creatingFolderSubmitting, setCreatingFolderSubmitting] = useState(false);
+  const [creatingFolderError, setCreatingFolderError] = useState<string | null>(null);
+  const [shareTarget, setShareTarget] = useState<
+    { type: "file" | "folder"; id: string; name: string } | null
+  >(null);
   const [dragActive, setDragActive] = useState(false);
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
   const [searching, setSearching] = useState(false);
+  const [sort, setSort] = useState<{ key: "name" | "size" | "date"; dir: "asc" | "desc" }>({
+    key: "name",
+    dir: "asc",
+  });
   const dragCounter = useRef(0);
+
+  // Search lives in the global top bar (PortalTopBar) — it drives navigation to
+  // /portal?q=..., and this component just reacts to the URL, no local input.
+  const searchParams = useSearchParams();
+  const searchQuery = searchParams.get("q") ?? "";
   const isSearching = searchQuery.trim().length > 0;
+
+  const openUploadPicker = useCallback(() => fileInputRef.current?.click(), []);
+  const startNewFolder = useCallback(() => setCreatingFolder(true), []);
+  useRegisterBrowserActions({ openUploadPicker, startNewFolder });
 
   const runSearch = useCallback((q: string) => {
     if (!q) return;
@@ -111,8 +128,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
       setSearching(false);
       return;
     }
-    const timer = setTimeout(() => runSearch(q), 300);
-    return () => clearTimeout(timer);
+    runSearch(q);
   }, [searchQuery, runSearch]);
 
   useEffect(() => {
@@ -150,20 +166,17 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     load();
   }, [load]);
 
-  async function handleCreateFolder() {
-    const name = newFolderName.trim();
-    if (!name) {
-      setCreatingFolder(false);
-      return;
-    }
-    setActionError(null);
+  async function handleCreateFolder(name: string) {
+    setCreatingFolderError(null);
+    setCreatingFolderSubmitting(true);
     try {
       await api.post("/folders", { name, parentId: folderId });
-      setNewFolderName("");
       setCreatingFolder(false);
       load();
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Couldn't create the folder.");
+      setCreatingFolderError(err instanceof ApiError ? err.message : "Couldn't create the folder.");
+    } finally {
+      setCreatingFolderSubmitting(false);
     }
   }
 
@@ -250,16 +263,6 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     }
   }
 
-  async function handleShare(file: FileItem) {
-    setActionError(null);
-    try {
-      const { url } = await api.post<{ url: string }>(`/files/${file.id}/share`);
-      setShareUrl(url);
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Couldn't create a share link.");
-    }
-  }
-
   async function handleDeleteFile(file: FileItem) {
     if (!window.confirm(`Delete "${file.name}"? This can't be undone.`)) return;
     setActionError(null);
@@ -286,6 +289,22 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
   const isEmpty = !loading && folders.length === 0 && files.length === 0;
   const pageTitle = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "My Files";
+
+  const sortedFiles = useMemo(() => {
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...files].sort((a, b) => {
+      if (sort.key === "size") return (a.sizeBytes - b.sizeBytes) * dir;
+      if (sort.key === "date")
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      return a.name.localeCompare(b.name) * dir;
+    });
+  }, [files, sort]);
+
+  function toggleSort(key: "name" | "size" | "date") {
+    setSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" },
+    );
+  }
 
   return (
     <div
@@ -324,87 +343,35 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
               </span>
             ))}
           </div>
-          <h1 className="text-foreground text-[26px] font-bold tracking-[-0.01em]">
-            {isSearching ? `Search results for "${searchQuery.trim()}"` : pageTitle}
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-2.5 pt-1">
-          <div className="relative">
-            <Search className="text-ink-400 pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files and folders…"
-              className="border-input bg-background w-56 rounded-lg border py-2 pr-3 pl-9 text-sm outline-none focus:w-72 transition-[width]"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                aria-label="Clear search"
-                className="text-ink-450 hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer p-0.5"
+          <div className="flex items-center gap-3">
+            <h1 className="text-foreground text-[26px] font-bold tracking-[-0.01em]">
+              {isSearching ? `Search results for "${searchQuery.trim()}"` : pageTitle}
+            </h1>
+            {isSearching && (
+              <Link
+                href="/portal"
+                className="border-input text-ink-600 hover:bg-surface-muted flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold"
               >
-                <X className="h-3.5 w-3.5" />
-              </button>
+                <X className="h-3 w-3" />
+                Clear
+              </Link>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => setCreatingFolder(true)}
-            className="border-input text-foreground hover:bg-surface-muted flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold"
-          >
-            <FolderPlus className="h-4 w-4" />
-            New folder
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold"
-          >
-            <Upload className="h-4 w-4" />
-            Upload
-          </button>
-          <input ref={fileInputRef} type="file" hidden multiple onChange={handleUpload} />
         </div>
+
+        <input ref={fileInputRef} type="file" hidden multiple onChange={handleUpload} />
       </div>
 
       {creatingFolder && (
-        <div className="border-border-subtle bg-surface-muted-2 mb-6 flex items-center gap-3 rounded-xl border p-4">
-          <FolderPlus className="text-accent-foreground h-5 w-5 shrink-0" />
-          <input
-            autoFocus
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCreateFolder();
-              if (e.key === "Escape") {
-                setCreatingFolder(false);
-                setNewFolderName("");
-              }
-            }}
-            placeholder="Folder name"
-            className="border-input bg-background flex-1 rounded-lg border px-3.5 py-2 text-sm outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleCreateFolder}
-            className="bg-primary text-primary-foreground cursor-pointer rounded-lg px-3.5 py-2 text-sm font-semibold"
-          >
-            Create
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCreatingFolder(false);
-              setNewFolderName("");
-            }}
-            className="text-ink-450 hover:text-foreground cursor-pointer rounded-lg p-2"
-            aria-label="Cancel"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        <NewFolderModal
+          onCancel={() => {
+            setCreatingFolder(false);
+            setCreatingFolderError(null);
+          }}
+          onCreate={handleCreateFolder}
+          creating={creatingFolderSubmitting}
+          error={creatingFolderError}
+        />
       )}
 
       {(error || actionError) && (
@@ -423,26 +390,6 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
         </div>
       )}
 
-      {shareUrl && (
-        <div className="border-border-subtle bg-surface-muted mb-6 flex items-center gap-3 rounded-xl border p-3.5 text-[13px]">
-          <span className="text-ink-700 flex-1 truncate">{shareUrl}</span>
-          <button
-            type="button"
-            onClick={() => navigator.clipboard.writeText(shareUrl)}
-            className="text-primary cursor-pointer font-semibold"
-          >
-            Copy
-          </button>
-          <button
-            type="button"
-            onClick={() => setShareUrl(null)}
-            className="text-ink-450 hover:text-foreground cursor-pointer"
-            aria-label="Dismiss"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
 
       {isSearching ? (
         searching && !searchResults ? (
@@ -465,24 +412,35 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                 </h2>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                   {searchResults.folders.map((folder) => (
-                    <Link
-                      key={folder.id}
-                      href={`/portal/folder/${folder.id}`}
-                      onClick={() => setSearchQuery("")}
-                      className="border-border-subtle bg-background hover:border-border-strong flex items-center gap-3 rounded-xl border p-4 transition"
-                    >
-                      <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-                        <FolderIcon className="text-accent-foreground h-5 w-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-foreground truncate text-[14px] font-medium">
-                          {folder.name}
+                    <div key={folder.id} className="group relative">
+                      <Link
+                        href={`/portal/folder/${folder.id}`}
+                        className="border-border-subtle bg-background hover:border-border-strong flex items-center gap-3 rounded-xl border p-4 transition"
+                      >
+                        <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
+                          <FolderIcon className="text-accent-foreground h-5 w-5" />
                         </div>
-                        <div className="text-ink-450 truncate text-[12px]">
-                          in {folder.parentName}
+                        <div className="min-w-0">
+                          <div className="text-foreground truncate text-[14px] font-medium">
+                            {folder.name}
+                          </div>
+                          <div className="text-ink-450 truncate text-[12px]">
+                            in {folder.parentName}
+                          </div>
                         </div>
-                      </div>
-                    </Link>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setShareTarget({ type: "folder", id: folder.id, name: folder.name });
+                        }}
+                        aria-label={`Share ${folder.name}`}
+                        className="text-ink-400 hover:text-primary bg-background border-border-subtle absolute -top-2 -right-2 cursor-pointer rounded-full border p-1 opacity-0 shadow-sm transition group-hover:opacity-100"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -546,7 +504,9 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleShare(file)}
+                                  onClick={() =>
+                                    setShareTarget({ type: "file", id: file.id, name: file.name })
+                                  }
                                   className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
                                   aria-label={`Share ${file.name}`}
                                 >
@@ -619,17 +579,30 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                         {folder.name}
                       </span>
                     </Link>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        handleDeleteFolder(folder);
-                      }}
-                      aria-label={`Delete ${folder.name}`}
-                      className="text-ink-400 hover:text-error-text bg-background border-border-subtle absolute -top-2 -right-2 cursor-pointer rounded-full border p-1 opacity-0 shadow-sm transition group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setShareTarget({ type: "folder", id: folder.id, name: folder.name });
+                        }}
+                        aria-label={`Share ${folder.name}`}
+                        className="text-ink-400 hover:text-primary bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleDeleteFolder(folder);
+                        }}
+                        aria-label={`Delete ${folder.name}`}
+                        className="text-ink-400 hover:text-error-text bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -645,20 +618,56 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-border-subtle bg-surface-muted-2 border-b">
-                      <th className="text-ink-450 px-5 py-2.5 text-xs font-semibold tracking-wide uppercase">
-                        Name
+                      <th className="px-5 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleSort("name")}
+                          className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
+                        >
+                          Name
+                          {sort.key === "name" &&
+                            (sort.dir === "asc" ? (
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            ))}
+                        </button>
                       </th>
-                      <th className="text-ink-450 hidden px-5 py-2.5 text-xs font-semibold tracking-wide uppercase sm:table-cell">
-                        Size
+                      <th className="hidden px-5 py-2.5 sm:table-cell">
+                        <button
+                          type="button"
+                          onClick={() => toggleSort("size")}
+                          className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
+                        >
+                          Size
+                          {sort.key === "size" &&
+                            (sort.dir === "asc" ? (
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            ))}
+                        </button>
                       </th>
-                      <th className="text-ink-450 hidden px-5 py-2.5 text-xs font-semibold tracking-wide uppercase md:table-cell">
-                        Uploaded
+                      <th className="hidden px-5 py-2.5 md:table-cell">
+                        <button
+                          type="button"
+                          onClick={() => toggleSort("date")}
+                          className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
+                        >
+                          Uploaded
+                          {sort.key === "date" &&
+                            (sort.dir === "asc" ? (
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            ))}
+                        </button>
                       </th>
                       <th className="px-5 py-2.5" />
                     </tr>
                   </thead>
                   <tbody>
-                    {files.map((file) => {
+                    {sortedFiles.map((file) => {
                       const Icon = getFileIcon(file.mimeType);
                       return (
                         <tr
@@ -694,7 +703,9 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleShare(file)}
+                                onClick={() =>
+                                  setShareTarget({ type: "file", id: file.id, name: file.name })
+                                }
                                 className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
                                 aria-label={`Share ${file.name}`}
                               >
@@ -804,6 +815,15 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           file={previewFile}
           onClose={() => setPreviewFile(null)}
           onDownload={() => handleDownload(previewFile)}
+        />
+      )}
+
+      {shareTarget && (
+        <ShareModal
+          resourceType={shareTarget.type}
+          resourceId={shareTarget.id}
+          resourceName={shareTarget.name}
+          onClose={() => setShareTarget(null)}
         />
       )}
     </div>

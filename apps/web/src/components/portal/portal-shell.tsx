@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import type { PortalOrganization, PortalUser } from "@/types/portal";
+import { BrowserActionsProvider } from "./browser-actions-context";
 import { PortalContext, type PortalContextValue } from "./portal-context";
 import { PortalSidebar } from "./portal-sidebar";
+import { PortalTopBar } from "./portal-topbar";
 
 type LoadState =
   | { status: "loading" }
@@ -36,14 +38,17 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   if (state.status !== "ready") {
     return (
-      <div className="flex min-h-screen w-full">
-        <div className="border-border-subtle bg-surface-muted-2 h-screen w-[264px] shrink-0 animate-pulse border-r" />
-        <div className="flex-1 px-12 py-10">
-          <div className="bg-surface-muted h-7 w-40 animate-pulse rounded-lg" />
-          <div className="mt-8 grid grid-cols-4 gap-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="bg-surface-muted h-28 animate-pulse rounded-xl" />
-            ))}
+      <div className="flex h-screen w-full flex-col">
+        <div className="border-border-subtle bg-background h-16 shrink-0 animate-pulse border-b" />
+        <div className="flex min-h-0 flex-1">
+          <div className="border-border-subtle bg-surface-muted-2 h-full w-[264px] shrink-0 animate-pulse border-r" />
+          <div className="flex-1 px-12 py-10">
+            <div className="bg-surface-muted h-7 w-40 animate-pulse rounded-lg" />
+            <div className="mt-8 grid grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="bg-surface-muted h-28 animate-pulse rounded-xl" />
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -52,10 +57,15 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   return (
     <PortalContext.Provider value={{ ...state.value, refresh: fetchMe }}>
-      <div className="bg-background text-foreground flex min-h-screen w-full">
-        <PortalSidebar />
-        <main className="min-w-0 flex-1 px-12 py-10">{children}</main>
-      </div>
+      <BrowserActionsProvider>
+        <div className="bg-background text-foreground flex h-screen w-full flex-col">
+          <PortalTopBar />
+          <div className="flex min-h-0 flex-1">
+            <PortalSidebar />
+            <main className="min-w-0 flex-1 overflow-y-auto px-12 py-10">{children}</main>
+          </div>
+        </div>
+      </BrowserActionsProvider>
     </PortalContext.Provider>
   );
 }

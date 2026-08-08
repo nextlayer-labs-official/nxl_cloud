@@ -128,26 +128,44 @@ Scoped deliberately to a working core rather than the full roadmap breadth below
 see the "not done" list for what's left.
 
 - ✅ `apps/web/src/app/portal/` — auth-gated shell (`PortalShell`, client-side
-  `/auth/me` check, redirects to `/login` on 401), portal header showing org name +
-  user + logout
+  `/auth/me` check, redirects to `/login` on 401), sidebar with workspace card,
+  storage-usage indicator, nav, and user/logout
 - ✅ File browser: nested folder navigation with full breadcrumb trail, create
-  folder, upload (direct-to-Wasabi via presigned URL), download, per-file share
-  link, delete (files and empty folders)
+  folder, drag-and-drop or button upload (direct-to-Wasabi via presigned URL, live
+  per-file progress via XHR), download, per-file share link, delete (files and
+  empty folders), org-wide search across files/folders
+- ✅ In-app file previews (images, PDF, video/audio, text/code) via a
+  `Content-Disposition: inline` presigned URL, separate from the attachment
+  download URL
+- ✅ `/portal/settings` — profile edit (name/email), password change, and full
+  account deletion (cascades and removes all Wasabi objects)
 - ✅ Public `/share/[token]` page — resolves a share link with no auth required
 - ✅ Login/Register now redirect to `/portal` on success (previously showed static
   "you're logged in" text, since there was nowhere real to send them before this)
+- ✅ **Product decision (2026-08-07): personal/solo workspace is the current focus.**
+  Company name at registration is now optional (defaults to "{name}'s Workspace"),
+  auth-page copy dropped "Work email"/enterprise trust-badge language, and the
+  sidebar no longer shows a single-user "Owner" role badge. Team accounts (inviting
+  a second person into an org) are explicitly deferred to a later phase — see
+  the note on `Membership`/team invites below.
 - ✅ Verified end-to-end in a real browser: register → land in empty portal → create
   folder → navigate in/out via breadcrumb → delete folder → logout → confirm direct
-  `/portal` access redirects to `/login` when logged out. Upload verified to fail
-  _gracefully_ (clear error, no crash) given placeholder Wasabi credentials — full
-  upload/download only provable once real credentials exist.
-- ⏳ File previews — not done (download-only for now)
+  `/portal` access redirects to `/login` when logged out. Upload, download, share,
+  and preview all verified against a real Wasabi bucket. Account deletion verified
+  against a real throwaway account (renamed, password changed, re-logged-in with
+  the new password, deleted, then confirmed the old credentials no longer work).
 - ⏳ Comments — schema exists (`Comment` model), no UI
-- ⏳ Team spaces UI — schema exists (`Team`/`TeamMembership`), folders can be
-  team-scoped in the data model, but the portal has no team switcher/assignment UI
+- ⏳ Team accounts / invites — schema (`Membership`, `Team`/`TeamMembership`)
+  already supports multiple users per org, but nothing creates a second
+  `Membership` on an existing org today; every registration always creates a
+  brand-new org. Deliberately deferred until the product has traction — see
+  product decision above. Verification mechanism for company accounts (real
+  email verification vs. work-domain heuristic vs. manual approval) was
+  discussed but not decided.
 - ⏳ Activity feed — `AuditLog` isn't even being written to yet by the files/folders
   endpoints (only auth writes one row on registration); needs both the write side
-  and a feed UI
+  and a feed UI. Lower priority now given the personal-workspace focus (an
+  activity feed matters more once multiple people share a workspace).
 - ⏳ Version history UI — `FileVersion` rows are created on upload, but there's no
   UI to view/restore past versions (currently always version 1, since re-uploading
   a same-named file just creates a new `File` row rather than a new version)
@@ -157,14 +175,52 @@ see the "not done" list for what's left.
   full access to everything in their org; the `Permission` table from Phase 2 isn't
   consulted anywhere yet
 
-## Phase 7 — Billing & Subscription
+## Phase 7 — Billing & Subscription — MVP ✅ done, unverified against a real Stripe account
 
-Wires the existing Pricing page to real payment logic.
+Wires the existing `Plan`/`Subscription` models to real Stripe billing. Built
+against the Stripe API per the "no live keys yet" choice (same approach as Wasabi
+in Phase 5) — fully wired, but live-verified only once real keys are added.
 
-- Stripe (or equivalent) integration: checkout, webhooks, subscription lifecycle
-- Plan/seat management tied to the `Plan`/`Subscription` models from Phase 2
-- Usage-based storage add-ons (the Pricing page already shows these as line items)
-- Invoicing, dunning/failed-payment handling
+- ✅ `apps/api/src/billing/` — `BillingService`/`BillingController` using the
+  `stripe` SDK (v22). Boots fine with no `STRIPE_SECRET_KEY` set; billing-specific
+  endpoints return a clear 503 instead of crashing, mirroring `StorageService`'s
+  pattern for missing Wasabi credentials.
+- ✅ `GET /billing/plans` — lists `Plan` rows (Starter/Business/Enterprise),
+  sorted by price ascending with `null` (Enterprise's "Contact us" custom pricing)
+  sorted last
+- ✅ `GET /billing/subscription` — current org's subscription + plan
+- ✅ `POST /billing/checkout` — creates a Stripe Customer (first time) and a
+  Checkout Session using inline `price_data` (no pre-created Stripe Price objects
+  needed, since there's no real Stripe account to create them in yet)
+- ✅ `POST /billing/portal` — Stripe Billing Portal session for self-serve
+  cancel/payment-method/invoice management once a subscription exists — no
+  custom cancel/upgrade UI was built, deliberately, since Stripe's hosted portal
+  already covers it
+- ✅ `POST /billing/webhook` — verifies the Stripe signature (`rawBody: true` set
+  on the Nest app specifically for this route) and syncs `Subscription.status`/
+  `currentPeriodEnd` on `checkout.session.completed`, `customer.subscription.updated`,
+  `customer.subscription.deleted`, and `invoice.payment_failed`
+- ✅ `/portal/settings` — new "Plan & billing" section: current plan/status/renewal
+  date, a plan list with "Subscribe" (Starter/Business) or "Contact us" (Enterprise,
+  no self-serve price), and "Manage billing" once a Stripe customer exists
+- ✅ Verified in a real browser against the demo account: trial subscription reads
+  correctly ("Business · Trial · renews ..."), clicking Subscribe surfaces the
+  graceful "Billing isn't configured yet" message end-to-end (API → UI) rather
+  than failing silently or crashing
+- ⏳ **Not yet verified against a real Stripe account** — no live checkout,
+  webhook delivery, or portal session has actually been exercised. Needs
+  `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in `.env` (test mode is fine;
+  `.env.example` has setup notes, including using `stripe listen` for local
+  webhook forwarding) before that's provable.
+- ⏳ Usage-based storage add-ons (the Pricing page shows these as line items) —
+  not implemented; would need per-org storage-quota enforcement first, which
+  Phase 5 explicitly deferred to this phase and still isn't done
+- ⏳ Proration on plan switches, dunning/retry sequencing beyond marking
+  `PAST_DUE`, invoice history UI (Stripe's customer portal covers viewing past
+  invoices today, so this is low-priority)
+- ⏳ Marketing Pricing page CTAs are unchanged — they still link to `/register`,
+  not directly into checkout; billing is managed from `/portal/settings` after
+  the free trial, not from the Pricing page itself
 
 ## Phase 8 — Admin Portal
 

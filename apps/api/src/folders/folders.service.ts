@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { OrganizationsService } from "../organizations/organizations.service";
@@ -112,6 +113,26 @@ export class FoldersService {
     }
 
     return trail;
+  }
+
+  async createShareLink(userId: string, folderId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
+    if (!folder || folder.organizationId !== membership.organizationId) {
+      throw new NotFoundException("Folder not found.");
+    }
+
+    const token = randomBytes(24).toString("hex");
+    await prisma.shareLink.create({
+      data: {
+        resourceType: "FOLDER",
+        resourceId: folder.id,
+        token,
+        createdById: userId,
+      },
+    });
+    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    return { token, url: `${webOrigin}/share/${token}` };
   }
 
   async remove(userId: string, folderId: string) {

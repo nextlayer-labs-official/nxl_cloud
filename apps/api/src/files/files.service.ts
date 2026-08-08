@@ -82,10 +82,42 @@ export class FilesService {
     return { previewUrl };
   }
 
+  /**
+   * Soft delete only — moves the file to Trash. The Wasabi object is kept
+   * until `permanentlyDelete` is called, so `restore` has something to
+   * restore.
+   */
   async remove(userId: string, fileId: string) {
     const file = await this.getOwnedFile(userId, fileId);
     await prisma.file.update({ where: { id: file.id }, data: { deletedAt: new Date() } });
+  }
+
+  private async getTrashedFile(userId: string, fileId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const file = await prisma.file.findUnique({ where: { id: fileId } });
+    if (!file || file.organizationId !== membership.organizationId || !file.deletedAt) {
+      throw new NotFoundException("File not found in trash.");
+    }
+    return file;
+  }
+
+  async listTrash(userId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    return prisma.file.findMany({
+      where: { organizationId: membership.organizationId, deletedAt: { not: null } },
+      orderBy: { deletedAt: "desc" },
+    });
+  }
+
+  async restore(userId: string, fileId: string) {
+    const file = await this.getTrashedFile(userId, fileId);
+    await prisma.file.update({ where: { id: file.id }, data: { deletedAt: null } });
+  }
+
+  async permanentlyDelete(userId: string, fileId: string) {
+    const file = await this.getTrashedFile(userId, fileId);
     await this.storage.deleteObject(file.storageKey);
+    await prisma.file.delete({ where: { id: file.id } });
   }
 
   async createShareLink(userId: string, fileId: string) {

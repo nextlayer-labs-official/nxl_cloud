@@ -20,6 +20,11 @@ export class FilesController {
     return this.filesService.confirmUpload(req.user!.id, dto);
   }
 
+  @Get("trash")
+  listTrash(@Req() req: Request) {
+    return this.filesService.listTrash(req.user!.id);
+  }
+
   @Get(":id/download-url")
   getDownloadUrl(@Req() req: Request, @Param("id") id: string) {
     return this.filesService.getDownloadUrl(req.user!.id, id);
@@ -33,6 +38,18 @@ export class FilesController {
   @Delete(":id")
   async remove(@Req() req: Request, @Param("id") id: string) {
     await this.filesService.remove(req.user!.id, id);
+    return { success: true };
+  }
+
+  @Post(":id/restore")
+  async restore(@Req() req: Request, @Param("id") id: string) {
+    await this.filesService.restore(req.user!.id, id);
+    return { success: true };
+  }
+
+  @Delete(":id/permanent")
+  async permanentlyDelete(@Req() req: Request, @Param("id") id: string) {
+    await this.filesService.permanentlyDelete(req.user!.id, id);
     return { success: true };
   }
 

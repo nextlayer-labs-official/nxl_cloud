@@ -22,7 +22,7 @@ export class OrganizationsService {
 
   async getUsage(userId: string) {
     const membership = await this.getPrimaryMembership(userId);
-    const [usage, fileCount] = await Promise.all([
+    const [usage, fileCount, subscription] = await Promise.all([
       prisma.file.aggregate({
         where: { organizationId: membership.organizationId, deletedAt: null },
         _sum: { sizeBytes: true },
@@ -30,7 +30,19 @@ export class OrganizationsService {
       prisma.file.count({
         where: { organizationId: membership.organizationId, deletedAt: null },
       }),
+      prisma.subscription.findUnique({
+        where: { organizationId: membership.organizationId },
+        include: { plan: true },
+      }),
     ]);
-    return { usedBytes: usage._sum.sizeBytes ?? 0, fileCount };
+
+    const storageLimitGb = subscription?.plan.storageLimitGb ?? null;
+    return {
+      usedBytes: usage._sum.sizeBytes ?? 0,
+      fileCount,
+      // null = unlimited (Business/Enterprise plans have no storageLimitGb set).
+      limitBytes: storageLimitGb !== null ? storageLimitGb * 1024 * 1024 * 1024 : null,
+      planName: subscription?.plan.name ?? null,
+    };
   }
 }

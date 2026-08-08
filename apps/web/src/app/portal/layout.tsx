@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { PortalShell } from "@/components/portal/portal-shell";
 
 export const metadata: Metadata = {
@@ -7,5 +8,9 @@ export const metadata: Metadata = {
 };
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
-  return <PortalShell>{children}</PortalShell>;
+  return (
+    <Suspense fallback={null}>
+      <PortalShell>{children}</PortalShell>
+    </Suspense>
+  );
 }

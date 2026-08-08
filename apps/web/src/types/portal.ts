@@ -35,7 +35,32 @@ export interface BreadcrumbEntry {
   name: string;
 }
 
+export interface TrashedFile extends FileItem {
+  deletedAt: string;
+}
+
 export interface SearchResults {
   folders: (FolderItem & { parentName: string })[];
   files: (FileItem & { parentName: string })[];
+}
+
+export interface Plan {
+  id: string;
+  name: string;
+  priceMonthlyCents: number | null;
+  priceYearlyCents: number | null;
+  storageLimitGb: number | null;
+  seatLimit: number | null;
+  features: string[];
+}
+
+export type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED";
+
+export interface SubscriptionInfo {
+  id: string;
+  status: SubscriptionStatus;
+  billingCycle: "MONTHLY" | "ANNUAL";
+  currentPeriodEnd: string | null;
+  stripeCustomerId: string | null;
+  plan: Plan;
 }
