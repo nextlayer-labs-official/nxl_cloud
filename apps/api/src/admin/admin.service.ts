@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { hashPassword } from "../auth/password.util";
+import { applyDuePendingChange } from "../billing/subscription-lifecycle.util";
 import { uniqueOrgSlug } from "../organizations/slug.util";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import type { CreatePlanDto } from "./dto/create-plan.dto";
@@ -59,7 +60,7 @@ export class AdminService {
             take: 1,
             include: { user: true },
           },
-          subscription: { include: { plan: true } },
+          subscription: { include: { plan: true, pendingPlan: true } },
           _count: { select: { memberships: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -91,6 +92,7 @@ export class AdminService {
       freeUntil: org.subscription?.freeUntil ?? null,
       storageLimitGbOverride: org.subscription?.storageLimitGbOverride ?? null,
       planStorageLimitGb: org.subscription?.plan.storageLimitGb ?? null,
+      pendingPlanName: org.subscription?.pendingPlan?.name ?? null,
       storageUsedBytes: usageByOrg.get(org.id) ?? 0,
     }));
   }
@@ -102,12 +104,14 @@ export class AdminService {
   }
 
   async getOrganization(id: string) {
+    await applyDuePendingChange(id);
+
     const [organization, storageUsage] = await Promise.all([
       prisma.organization.findUnique({
         where: { id },
         include: {
           memberships: { include: { user: true }, orderBy: { createdAt: "asc" } },
-          subscription: { include: { plan: true } },
+          subscription: { include: { plan: true, pendingPlan: true } },
         },
       }),
       prisma.file.aggregate({
@@ -141,6 +145,9 @@ export class AdminService {
             freeUntil: organization.subscription.freeUntil,
             storageLimitGbOverride: organization.subscription.storageLimitGbOverride,
             plan: organization.subscription.plan,
+            pendingPlan: organization.subscription.pendingPlan
+              ? { name: organization.subscription.pendingPlan.name }
+              : null,
           }
         : null,
     };
@@ -198,6 +205,10 @@ export class AdminService {
           ...(dto.storageLimitGbOverride !== undefined && {
             storageLimitGbOverride: dto.storageLimitGbOverride,
           }),
+          // An admin override is a direct, immediate decision — it always supersedes
+          // whatever downgrade the customer had scheduled for renewal.
+          pendingPlanId: null,
+          pendingBillingCycle: null,
         },
         include: { plan: true },
       });

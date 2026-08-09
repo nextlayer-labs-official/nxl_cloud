@@ -160,6 +160,12 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
                 Comped until {formatDate(org.subscription.freeUntil)}
               </div>
             )}
+            {org.subscription.pendingPlan && (
+              <div className="text-ink-450">
+                → switching to {org.subscription.pendingPlan.name} on renewal
+                {org.subscription.currentPeriodEnd && ` (${formatDate(org.subscription.currentPeriodEnd)})`}
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-ink-450 text-[13px]">No subscription yet.</p>

@@ -254,9 +254,62 @@ UPI/cards there.
 - ⏳ Usage-based storage add-ons (the Pricing page shows these as line items) —
   still not implemented as a self-serve purchase flow, though the underlying
   per-org storage-quota enforcement it would need now exists (Phase 8)
-- ⏳ Proration on plan switches, dunning/retry sequencing beyond marking
-  `PAST_DUE`, invoice history UI — no self-serve portal to cover these, so
-  they'd all need custom UI if ever built
+- ✅ Upgrade/downgrade mid-cycle (2026-08-09) — previously switching to *any*
+  other plan, higher or lower, went through the same path: full price charged
+  immediately, plan switched immediately, `currentPeriodEnd` reset to a fresh
+  period from today — silently discarding whatever paid time was left on the
+  old plan, with no distinction between upgrading and downgrading. Deliberately
+  **not** full proration (no partial-period credit/charge math, no mid-cycle
+  refunds) — a simpler rule instead:
+  - **Upgrades** (`Plan.priceMonthlyCents` higher than the current plan's):
+    unchanged — immediate, full price, right away.
+  - **Downgrades**: no charge and no immediate switch. `POST /billing/order`
+    detects it (existing subscription is `ACTIVE` with a future
+    `currentPeriodEnd` and the target plan is cheaper) and instead stores
+    `Subscription.pendingPlanId`/`pendingBillingCycle`, returning
+    `{ scheduled: true, effectiveDate, planName }` — the frontend shows
+    "Downgrade scheduled" and never opens the Razorpay checkout. The org keeps
+    its current (already-paid-for) plan until `currentPeriodEnd`.
+  - Since this app has no cron/job scheduler, the switch isn't pushed by a
+    background job — `applyDuePendingChange()` (`billing/subscription-lifecycle
+    .util.ts`) applies it lazily, the next time the subscription is actually
+    read (`getSubscription`, admin's `getOrganization`), once
+    `currentPeriodEnd` has passed. No new charge happens at that point either
+    — the org would need to actively resubscribe/renew like anyone else, same
+    as this app already works for everyone (there's no auto-billing engine).
+  - A pending downgrade is superseded by whatever supersedes it: a fresh
+    purchase (`activateSubscription` clears `pendingPlanId` on any new
+    payment), an explicit customer cancel (`POST /billing/cancel-pending-change`,
+    a "Cancel" link next to "Switching to X on renewal" in
+    `/portal/settings`), or an admin override (`AdminService.updateSubscription`
+    always clears it — a direct admin decision wins over a queued one).
+  - Surfaced in the admin organizations list (`Pro → Plus on renewal`) and org
+    detail page too, not just the customer's own settings page.
+  - Verified end-to-end: downgrade request returns `scheduled: true` with no
+    Razorpay order created; upgrade request (even with paid time remaining)
+    still returns a real order; canceling a pending downgrade restores the
+    normal "Subscribe" button; backdating `currentPeriodEnd` and re-fetching
+    the subscription correctly auto-applies the pending plan; admin override
+    clears a pending downgrade.
+- ✅ Self-serve renewal (2026-08-09) — there was no automated renewal to begin
+  with (no cron, no Razorpay Subscriptions — see the design note above), which
+  is fine by design, but the customer's own current plan's button was
+  permanently disabled ("Current plan"), so there was **no way for anyone to
+  renew at all**, self-serve or otherwise, once a period lapsed — only an
+  admin manually pushing `currentPeriodEnd` forward. The backend already
+  handled same-plan purchases correctly (`createOrder`'s downgrade check
+  requires the target plan to differ from the current one, so renewing was
+  never misclassified as a scheduled downgrade); the disabled button was the
+  only thing in the way. Now shows an enabled "Renew" button (outlined, to
+  read as a lower-key action than the "Subscribe" upsell CTA) that charges
+  immediately via the normal checkout path, same as an upgrade — no time
+  gating (e.g. "only within N days of expiry"), it's just always available.
+  Deliberately still no automatic enforcement when a period lapses unrenewed
+  (per the same product decision as the pending-downgrade note above) —
+  status stays `ACTIVE` and access is unaffected either way.
+- ⏳ Full proration, dunning/retry sequencing beyond marking `PAST_DUE`,
+  invoice history UI — no self-serve portal to cover these, so they'd all need
+  custom UI if ever built
 - ⏳ Marketing Pricing page CTAs are unchanged — they still link to `/register`,
   not directly into checkout; billing is managed from `/portal/settings` after
   the free trial, not from the Pricing page itself

@@ -321,8 +321,9 @@ model Plan {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  subscriptions Subscription[]
-  payments      Payment[]
+  subscriptions        Subscription[]
+  payments             Payment[]
+  pendingSubscriptions Subscription[] @relation("PendingPlan")
 }
 
 model Subscription {
@@ -345,11 +346,18 @@ model Subscription {
   /// Admin-set per-org storage cap in GB, overriding the plan's default
   /// (`Plan.storageLimitGb`). Null = inherit the plan's limit.
   storageLimitGbOverride Int?
+  /// A requested downgrade, applied automatically once `currentPeriodEnd`
+  /// passes (see subscription-lifecycle.util.ts) rather than immediately —
+  /// the customer keeps what they already paid for until then. Upgrades never
+  /// use this; they're charged and switched immediately.
+  pendingPlanId        String?
+  pendingBillingCycle  BillingCycle?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan         Plan         @relation(fields: [planId], references: [id])
+  pendingPlan  Plan?        @relation("PendingPlan", fields: [pendingPlanId], references: [id])
 }
 
 /// One row per successfully-captured payment — the transaction history shown

@@ -12,6 +12,7 @@ import { validatePaymentVerification, validateWebhookSignature } from "razorpay/
 import { OrganizationsService } from "../organizations/organizations.service";
 import type { CreateOrderDto } from "./dto/create-order.dto";
 import type { VerifyPaymentDto } from "./dto/verify-payment.dto";
+import { applyDuePendingChange } from "./subscription-lifecycle.util";
 
 const PERIOD_MS: Record<BillingCycle, number> = {
   MONTHLY: 30 * 24 * 60 * 60 * 1000,
@@ -56,15 +57,24 @@ export class BillingService {
 
   async getSubscription(userId: string) {
     const membership = await this.organizations.getPrimaryMembership(userId);
+    await applyDuePendingChange(membership.organizationId);
     return prisma.subscription.findUnique({
       where: { organizationId: membership.organizationId },
-      include: { plan: true },
+      include: { plan: true, pendingPlan: true },
     });
   }
 
+  /**
+   * Upgrades are immediate: charged in full and switched right away. Downgrades are
+   * scheduled instead — no charge, no immediate switch. The org keeps its current
+   * (already-paid-for) plan until `currentPeriodEnd`, at which point
+   * `applyDuePendingChange` flips it over. "Downgrade" is judged by comparing
+   * `priceMonthlyCents` regardless of which cycle is being requested, so it stays a
+   * stable ranking even if someone switches cycles at the same time.
+   */
   async createOrder(userId: string, dto: CreateOrderDto) {
-    const razorpay = this.requireRazorpay();
     const membership = await this.organizations.getPrimaryMembership(userId);
+    await applyDuePendingChange(membership.organizationId);
 
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
@@ -74,13 +84,36 @@ export class BillingService {
       throw new BadRequestException("This plan isn't available for self-serve checkout.");
     }
 
+    const existingSubscription = await prisma.subscription.findUnique({
+      where: { organizationId: membership.organizationId },
+      include: { plan: true },
+    });
+
+    const isDowngrade =
+      existingSubscription?.status === "ACTIVE" &&
+      !!existingSubscription.currentPeriodEnd &&
+      existingSubscription.currentPeriodEnd > new Date() &&
+      existingSubscription.plan.id !== plan.id &&
+      (existingSubscription.plan.priceMonthlyCents ?? Infinity) > (plan.priceMonthlyCents ?? Infinity);
+
+    if (isDowngrade) {
+      await prisma.subscription.update({
+        where: { organizationId: membership.organizationId },
+        data: { pendingPlanId: plan.id, pendingBillingCycle: dto.billingCycle },
+      });
+      return {
+        scheduled: true as const,
+        effectiveDate: existingSubscription.currentPeriodEnd,
+        planName: plan.name,
+      };
+    }
+
+    const razorpay = this.requireRazorpay();
+
     // An admin-set discount is prospective — it applies the next time the org actually
     // checks out (here), not retroactively to whatever they already paid for their
     // current period. This is the only place it's actually charged; it's cosmetic
     // everywhere else in the UI.
-    const existingSubscription = await prisma.subscription.findUnique({
-      where: { organizationId: membership.organizationId },
-    });
     const amount = existingSubscription?.discountPercent
       ? Math.round((listPrice * (100 - existingSubscription.discountPercent)) / 100)
       : listPrice;
@@ -98,7 +131,21 @@ export class BillingService {
       },
     });
 
-    return { orderId: order.id, amount: order.amount, currency: order.currency, keyId: this.keyId };
+    return {
+      scheduled: false as const,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: this.keyId,
+    };
+  }
+
+  async cancelPendingChange(userId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    await prisma.subscription.update({
+      where: { organizationId: membership.organizationId },
+      data: { pendingPlanId: null, pendingBillingCycle: null },
+    });
   }
 
   async verifyPayment(userId: string, dto: VerifyPaymentDto) {
@@ -163,6 +210,9 @@ export class BillingService {
       currentPeriodEnd: new Date(Date.now() + PERIOD_MS[billingCycle]),
       razorpayOrderId,
       razorpayPaymentId,
+      // A fresh purchase supersedes any scheduled downgrade queued from before.
+      pendingPlanId: null,
+      pendingBillingCycle: null,
     };
     await prisma.$transaction([
       prisma.subscription.upsert({

@@ -111,6 +111,11 @@ export function OrganizationsView() {
                         Comped until {formatDate(org.freeUntil)}
                       </div>
                     )}
+                    {org.pendingPlanName && (
+                      <div className="text-ink-450 text-[12px]">
+                        → {org.pendingPlanName} on renewal
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1">

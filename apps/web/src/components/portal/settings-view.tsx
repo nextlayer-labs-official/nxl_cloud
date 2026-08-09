@@ -182,17 +182,29 @@ export function SettingsView() {
     setCheckoutStatus(null);
     setBillingActionLoading(planId);
     try {
+      const order = await api.post<
+        | { scheduled: true; effectiveDate: string; planName: string }
+        | { scheduled: false; orderId: string; amount: number; currency: string; keyId: string }
+      >("/billing/order", { planId, billingCycle });
+
+      // Downgrades are never charged or switched immediately — they're scheduled for
+      // the current period's renewal date instead, so there's no Razorpay checkout to open.
+      if (order.scheduled) {
+        const [updatedSubscription, updatedTransactions] = await Promise.all([
+          api.get<SubscriptionInfo | null>("/billing/subscription"),
+          api.get<Transaction[]>("/billing/transactions"),
+        ]);
+        setSubscription(updatedSubscription);
+        setTransactions(updatedTransactions);
+        setCheckoutStatus("scheduled");
+        setBillingActionLoading(null);
+        return;
+      }
+
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded || !window.Razorpay) {
         throw new Error("Couldn't load the payment form. Check your connection and try again.");
       }
-
-      const order = await api.post<{
-        orderId: string;
-        amount: number;
-        currency: string;
-        keyId: string;
-      }>("/billing/order", { planId, billingCycle });
 
       let completed = false;
       const checkout = new window.Razorpay({
@@ -238,6 +250,22 @@ export function SettingsView() {
       setBillingActionError(
         err instanceof ApiError ? err.message : (err as Error).message || "Couldn't start checkout.",
       );
+      setBillingActionLoading(null);
+    }
+  }
+
+  async function handleCancelPendingChange() {
+    setBillingActionError(null);
+    setBillingActionLoading("cancel-pending");
+    try {
+      await api.post("/billing/cancel-pending-change");
+      const updated = await api.get<SubscriptionInfo | null>("/billing/subscription");
+      setSubscription(updated);
+    } catch (err) {
+      setBillingActionError(
+        err instanceof ApiError ? err.message : "Couldn't cancel the scheduled change.",
+      );
+    } finally {
       setBillingActionLoading(null);
     }
   }
@@ -375,6 +403,11 @@ export function SettingsView() {
         {checkoutStatus === "canceled" && (
           <p className="text-ink-450 mb-4 text-[13px]">Checkout canceled — no changes were made.</p>
         )}
+        {checkoutStatus === "scheduled" && (
+          <p className="text-success mb-4 text-[13px]">
+            Downgrade scheduled — you&apos;ll switch plans at your next renewal.
+          </p>
+        )}
         {billingLoading ? (
           <div className="bg-surface-muted h-24 animate-pulse rounded-xl" />
         ) : (
@@ -402,6 +435,27 @@ export function SettingsView() {
                 {!!subscription?.discountPercent && (
                   <div className="text-success mt-1 text-[13px] font-medium">
                     {subscription.discountPercent}% off will apply at your next renewal
+                  </div>
+                )}
+                {subscription?.pendingPlan && (
+                  <div className="text-ink-600 mt-1 flex items-center gap-2 text-[13px]">
+                    <span>
+                      Switching to <span className="font-medium">{subscription.pendingPlan.name}</span> on{" "}
+                      {subscription.currentPeriodEnd &&
+                        new Date(subscription.currentPeriodEnd).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCancelPendingChange}
+                      disabled={billingActionLoading === "cancel-pending"}
+                      className="text-primary cursor-pointer font-semibold hover:underline disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 )}
               </div>
@@ -433,6 +487,7 @@ export function SettingsView() {
               {plans.map((plan) => {
                 const isCurrent =
                   subscription?.plan.id === plan.id && subscription.status === "ACTIVE";
+                const isPending = subscription?.pendingPlan?.id === plan.id;
                 // The discount is org-level, not tied to the current plan specifically — it's
                 // honored at checkout regardless of which plan is purchased (see billing.service.ts
                 // createOrder), so show the real price on every purchasable row, not just the
@@ -470,13 +525,18 @@ export function SettingsView() {
                       <button
                         type="button"
                         onClick={() => handleSubscribe(plan.id)}
-                        disabled={isCurrent || billingActionLoading === plan.id}
-                        className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold disabled:opacity-60"
+                        disabled={isPending || billingActionLoading === plan.id}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold disabled:opacity-60",
+                          isCurrent
+                            ? "border-input text-foreground hover:bg-surface-muted border"
+                            : "bg-primary text-primary-foreground hover:bg-primary/90",
+                        )}
                       >
                         {billingActionLoading === plan.id && (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         )}
-                        {isCurrent ? "Current plan" : "Subscribe"}
+                        {isPending ? "Scheduled" : isCurrent ? "Renew" : "Subscribe"}
                       </button>
                     )}
                   </div>
