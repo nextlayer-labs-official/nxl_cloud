@@ -224,10 +224,24 @@ in Phase 5) — fully wired, but live-verified only once real keys are added.
 
 ## Phase 8 — Admin Portal
 
-Internal tooling, separate from the customer-facing portal.
+Internal tooling — a **fully separate system** from the customer-facing platform, not
+just a gated route inside it. Decided 2026-08-09 after a first attempt (an `/admin`
+route inside `apps/web` sharing `apps/api`, gated by a `User.isAdmin` flag) was
+deliberately built and then fully removed: reusing the customer app/backend/user
+table for platform staff was rejected as the wrong shape — it conflates "customer"
+and "staff" in one identity/session/deployment, which real SaaS platforms avoid.
 
-- Org-wide management across all customers (support/ops view)
-- Audit log review, impersonation-for-support (with proper guardrails), plan overrides
+Target shape for whenever this is picked up:
+
+- A separate `apps/admin` frontend and a separate `apps/admin-api` backend, each
+  their own deployable process — not routes bolted onto `apps/web`/`apps/api`.
+- Its own `AdminUser`/`AdminSession` database models, decoupled from the customer
+  `User`/`Session` tables — not a boolean flag on a customer account. Still reads
+  the same underlying database (orgs, subscriptions, files) since that's the one
+  source of truth, but admin identity and customer identity never share a table,
+  a session cookie, or a login form.
+- Org-wide management across all customers (support/ops view), plan overrides
+- Audit log review, impersonation-for-support (with proper guardrails)
 - Platform-level metrics/dashboards
 
 ## Phase 9 — Production Hardening & Launch

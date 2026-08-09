@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/types/portal";
 import { useRegisterBrowserActions } from "./browser-actions-context";
 import { FilePreviewModal } from "./file-preview-modal";
+import { NavIcon } from "./nav-icon";
 import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
 
@@ -418,7 +419,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                         className="border-border-subtle bg-background hover:border-border-strong flex items-center gap-3 rounded-xl border p-4 transition"
                       >
                         <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-                          <FolderIcon className="text-accent-foreground h-5 w-5" />
+                          <NavIcon icon={FolderIcon} className="text-accent-foreground h-5 w-5" />
                         </div>
                         <div className="min-w-0">
                           <div className="text-foreground truncate text-[14px] font-medium">
@@ -573,7 +574,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                       className="border-border-subtle bg-background hover:border-border-strong hover:shadow-[0_8px_20px_-12px_oklch(0.22_0.02_260_/_0.2)] flex items-center gap-3 rounded-xl border p-4 transition"
                     >
                       <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-                        <FolderIcon className="text-accent-foreground h-5 w-5" />
+                        <NavIcon icon={FolderIcon} className="text-accent-foreground h-5 w-5" />
                       </div>
                       <span className="text-foreground truncate text-[14px] font-medium">
                         {folder.name}

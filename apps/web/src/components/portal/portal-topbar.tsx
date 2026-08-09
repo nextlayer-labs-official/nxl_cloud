@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LogOut, Search, Settings, Sparkles } from "lucide-react";
 import { api } from "@/lib/api-client";
+import { NavIcon } from "./nav-icon";
 import { usePortal } from "./portal-context";
 
 function initials(name: string): string {
@@ -75,14 +76,14 @@ export function PortalTopBar() {
           aria-label="Settings"
           className="text-ink-450 hover:bg-surface-muted hover:text-foreground rounded-full p-2.5"
         >
-          <Settings className="h-[18px] w-[18px]" />
+          <NavIcon icon={Settings} className="h-[18px] w-[18px]" />
         </Link>
 
         <Link
           href="/portal/settings?tab=billing"
           className="bg-accent text-accent-foreground hover:bg-accent/80 ml-1 flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold"
         >
-          <Sparkles className="h-3.5 w-3.5" />
+          <NavIcon icon={Sparkles} className="h-3.5 w-3.5" />
           Upgrade
         </Link>
 

@@ -8,6 +8,7 @@ import { api } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useBrowserActions } from "./browser-actions-context";
+import { NavIcon } from "./nav-icon";
 import { usePortal } from "./portal-context";
 
 interface Usage {
@@ -109,7 +110,7 @@ export function PortalSidebar() {
               : "text-ink-600 hover:bg-background",
           )}
         >
-          <Folder className="h-4 w-4" />
+          <NavIcon icon={Folder} className="h-4 w-4" />
           My Files
         </Link>
         <Link
@@ -121,7 +122,7 @@ export function PortalSidebar() {
               : "text-ink-600 hover:bg-background",
           )}
         >
-          <Users className="h-4 w-4" />
+          <NavIcon icon={Users} className="h-4 w-4" />
           Shared
         </Link>
         <Link
@@ -133,7 +134,7 @@ export function PortalSidebar() {
               : "text-ink-600 hover:bg-background",
           )}
         >
-          <Trash2 className="h-4 w-4" />
+          <NavIcon icon={Trash2} className="h-4 w-4" />
           Trash
         </Link>
       </nav>
