@@ -73,27 +73,6 @@ export function RegisterForm() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-col gap-2.5">
-        <button
-          type="button"
-          className="border-input bg-background cursor-pointer rounded-lg border p-[11px] text-sm font-semibold"
-        >
-          Continue with Google
-        </button>
-        <button
-          type="button"
-          className="border-input bg-background cursor-pointer rounded-lg border p-[11px] text-sm font-semibold"
-        >
-          Continue with Microsoft
-        </button>
-      </div>
-
-      <div className="mb-6 flex items-center gap-3">
-        <div className="bg-border h-px flex-1" />
-        <div className="text-ink-550 text-xs">or</div>
-        <div className="bg-border h-px flex-1" />
-      </div>
-
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <FormField
           id="r-name"
