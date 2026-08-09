@@ -1,8 +1,20 @@
+import { randomBytes, scrypt as scryptCallback } from "node:crypto";
+import { promisify } from "node:util";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 
 const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
 const prisma = new PrismaClient({ adapter });
+
+// Duplicated from apps/api/src/auth/password.util.ts on purpose — this package
+// doesn't depend on apps/api, and the format (salt:hex via scrypt) just needs
+// to match what AdminAuthService.login verifies against.
+const scrypt = promisify(scryptCallback);
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
+  return `${salt}:${derivedKey.toString("hex")}`;
+}
 
 async function main() {
   // Plans — mirror the 3 Pricing page tiers exactly.
@@ -149,10 +161,22 @@ async function main() {
     },
   });
 
+  const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? "Admin12345";
+  const adminUser = await prisma.adminUser.upsert({
+    where: { email: "admin@nextlayer.cloud" },
+    update: {},
+    create: {
+      email: "admin@nextlayer.cloud",
+      name: "Platform Admin",
+      passwordHash: await hashPassword(adminPassword),
+    },
+  });
+
   console.log("Seeded:", {
     plans: [starter.name, business.name, enterprise.name],
     organization: org.name,
     users: [owner.email, admin.email, member.email],
+    adminUser: adminUser.email,
   });
 }
 

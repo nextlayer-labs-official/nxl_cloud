@@ -1,6 +1,6 @@
 import { IsIn, IsNotEmpty } from "class-validator";
 
-export class CreateCheckoutSessionDto {
+export class CreateOrderDto {
   @IsNotEmpty()
   planId!: string;
 

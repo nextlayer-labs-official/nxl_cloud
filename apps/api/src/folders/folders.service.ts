@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { OrganizationsService } from "../organizations/organizations.service";
+import { activeShareResourceIds, getOrCreateShareLink, revokeShareLink } from "../share/share-link.util";
 import type { CreateFolderDto } from "./dto/create-folder.dto";
 
 @Injectable()
@@ -33,7 +33,21 @@ export class FoldersService {
       }),
     ]);
 
-    return { folders, files };
+    const [sharedFolderIds, sharedFileIds] = await Promise.all([
+      activeShareResourceIds(
+        "FOLDER",
+        folders.map((f) => f.id),
+      ),
+      activeShareResourceIds(
+        "FILE",
+        files.map((f) => f.id),
+      ),
+    ]);
+
+    return {
+      folders: folders.map((f) => ({ ...f, isShared: sharedFolderIds.has(f.id) })),
+      files: files.map((f) => ({ ...f, isShared: sharedFileIds.has(f.id) })),
+    };
   }
 
   /** Flat, org-wide name search across folders and files (not scoped to the current folder). */
@@ -57,6 +71,17 @@ export class FoldersService {
       }),
     ]);
 
+    const [sharedFolderIds, sharedFileIds] = await Promise.all([
+      activeShareResourceIds(
+        "FOLDER",
+        folders.map((f) => f.id),
+      ),
+      activeShareResourceIds(
+        "FILE",
+        files.map((f) => f.id),
+      ),
+    ]);
+
     return {
       folders: folders.map((f) => ({
         id: f.id,
@@ -64,6 +89,7 @@ export class FoldersService {
         parentId: f.parentId,
         createdAt: f.createdAt,
         parentName: f.parent?.name ?? "My Files",
+        isShared: sharedFolderIds.has(f.id),
       })),
       files: files.map((f) => ({
         id: f.id,
@@ -73,6 +99,7 @@ export class FoldersService {
         folderId: f.folderId,
         createdAt: f.createdAt,
         parentName: f.folder?.name ?? "My Files",
+        isShared: sharedFileIds.has(f.id),
       })),
     };
   }
@@ -115,33 +142,27 @@ export class FoldersService {
     return trail;
   }
 
-  async createShareLink(userId: string, folderId: string) {
+  private async getOwnedFolder(userId: string, folderId: string) {
     const membership = await this.organizations.getPrimaryMembership(userId);
     const folder = await prisma.folder.findUnique({ where: { id: folderId } });
     if (!folder || folder.organizationId !== membership.organizationId) {
       throw new NotFoundException("Folder not found.");
     }
+    return folder;
+  }
 
-    const token = randomBytes(24).toString("hex");
-    await prisma.shareLink.create({
-      data: {
-        resourceType: "FOLDER",
-        resourceId: folder.id,
-        token,
-        createdById: userId,
-      },
-    });
-    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
-    return { token, url: `${webOrigin}/share/${token}` };
+  async createShareLink(userId: string, folderId: string) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    return getOrCreateShareLink("FOLDER", folder.id, userId);
+  }
+
+  async removeShareLink(userId: string, folderId: string) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    await revokeShareLink("FOLDER", folder.id);
   }
 
   async remove(userId: string, folderId: string) {
-    const membership = await this.organizations.getPrimaryMembership(userId);
-    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
-
-    if (!folder || folder.organizationId !== membership.organizationId) {
-      throw new NotFoundException("Folder not found.");
-    }
+    await this.getOwnedFolder(userId, folderId);
 
     const [childFolderCount, fileCount] = await Promise.all([
       prisma.folder.count({ where: { parentId: folderId } }),

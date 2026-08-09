@@ -3,6 +3,7 @@ import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/co
 import { prisma } from "@nextlayer/database";
 import type { Request } from "express";
 import { OrganizationsService } from "../organizations/organizations.service";
+import { uniqueOrgSlug } from "../organizations/slug.util";
 import { StorageService } from "../storage/storage.service";
 import type { ChangePasswordDto } from "./dto/change-password.dto";
 import type { DeleteAccountDto } from "./dto/delete-account.dto";
@@ -14,14 +15,6 @@ import { hashPassword, verifyPassword } from "./password.util";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // Matches the FAQ page's "Every plan starts with a 14-day free trial" copy.
 const TRIAL_LENGTH_MS = 14 * 24 * 60 * 60 * 1000;
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
 
 function getUserAgent(req: Request): string | undefined {
   const ua = req.headers["user-agent"];
@@ -51,17 +44,15 @@ export class AuthService {
 
     // Solo/personal workspace by default — a company name is optional, not required.
     const workspaceName = dto.company?.trim() || `${dto.name}'s Workspace`;
-    const baseSlug = slugify(workspaceName) || "workspace";
-    let slug = baseSlug;
-    let suffix = 0;
-    while (await prisma.organization.findUnique({ where: { slug } })) {
-      suffix += 1;
-      slug = `${baseSlug}-${suffix}`;
-    }
+    const slug = await uniqueOrgSlug(workspaceName);
 
-    // New orgs trial the Business plan by default (matches "Start free trial"
-    // on the Business tier being the marketing site's primary CTA).
-    const businessPlan = await prisma.plan.findFirst({ where: { name: "Business" } });
+    // New orgs trial whichever plan the admin has marked as default (not looked up
+    // by name — plan names are renameable from the admin panel, and a name-based
+    // lookup like `{ name: "Business" }` silently breaks every signup the moment
+    // that plan gets renamed).
+    const defaultPlan =
+      (await prisma.plan.findFirst({ where: { isDefault: true } })) ??
+      (await prisma.plan.findFirst({ orderBy: { createdAt: "asc" } }));
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -73,11 +64,11 @@ export class AuthService {
       await tx.membership.create({
         data: { userId: user.id, organizationId: organization.id, role: "OWNER" },
       });
-      if (businessPlan) {
+      if (defaultPlan) {
         await tx.subscription.create({
           data: {
             organizationId: organization.id,
-            planId: businessPlan.id,
+            planId: defaultPlan.id,
             status: "TRIALING",
             billingCycle: "MONTHLY",
             currentPeriodEnd: new Date(Date.now() + TRIAL_LENGTH_MS),
@@ -102,10 +93,19 @@ export class AuthService {
 
   async login(dto: LoginDto, req: Request) {
     const email = dto.email.toLowerCase().trim();
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: {
+        memberships: { orderBy: { createdAt: "asc" }, take: 1, include: { organization: true } },
+      },
+    });
 
     if (!user?.passwordHash || !(await verifyPassword(dto.password, user.passwordHash))) {
       throw new UnauthorizedException("Incorrect email or password.");
+    }
+
+    if (user.memberships[0]?.organization.suspendedAt) {
+      throw new UnauthorizedException("This account has been suspended.");
     }
 
     const sessionToken = randomBytes(32).toString("hex");

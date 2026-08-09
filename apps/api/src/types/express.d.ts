@@ -5,10 +5,17 @@ export interface SessionUser {
   avatarUrl: string | null;
 }
 
+export interface AdminSessionUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
 declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
+      adminUser?: AdminSessionUser;
     }
   }
 }

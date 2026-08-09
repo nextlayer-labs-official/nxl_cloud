@@ -19,6 +19,7 @@ export interface FolderItem {
   name: string;
   parentId: string | null;
   createdAt: string;
+  isShared: boolean;
 }
 
 export interface FileItem {
@@ -28,6 +29,7 @@ export interface FileItem {
   sizeBytes: number;
   folderId: string | null;
   createdAt: string;
+  isShared: boolean;
 }
 
 export interface BreadcrumbEntry {
@@ -61,6 +63,16 @@ export interface SubscriptionInfo {
   status: SubscriptionStatus;
   billingCycle: "MONTHLY" | "ANNUAL";
   currentPeriodEnd: string | null;
-  stripeCustomerId: string | null;
+  discountPercent: number | null;
+  freeUntil: string | null;
   plan: Plan;
+}
+
+export interface Transaction {
+  id: string;
+  amountCents: number;
+  currency: string;
+  billingCycle: "MONTHLY" | "ANNUAL";
+  createdAt: string;
+  plan: { name: string };
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, Link as LinkIcon } from "lucide-react";
+import { Check, Copy, Link as LinkIcon, Loader2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
 
 interface ShareModalProps {
@@ -9,13 +9,21 @@ interface ShareModalProps {
   resourceType: "file" | "folder";
   resourceId: string;
   onClose: () => void;
+  onRevoked: () => void;
 }
 
-export function ShareModal({ resourceName, resourceType, resourceId, onClose }: ShareModalProps) {
+export function ShareModal({
+  resourceName,
+  resourceType,
+  resourceId,
+  onClose,
+  onRevoked,
+}: ShareModalProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [revoking, setRevoking] = useState(false);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -60,6 +68,20 @@ export function ShareModal({ resourceName, resourceType, resourceId, onClose }: 
     }
   }
 
+  async function handleStopSharing() {
+    setRevoking(true);
+    setError(null);
+    try {
+      const endpoint =
+        resourceType === "file" ? `/files/${resourceId}/share` : `/folders/${resourceId}/share`;
+      await api.delete(endpoint);
+      onRevoked();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't stop sharing.");
+      setRevoking(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
@@ -92,32 +114,43 @@ export function ShareModal({ resourceName, resourceType, resourceId, onClose }: 
           </div>
         )}
 
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-6 flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={onClose}
-            className="text-foreground hover:bg-surface-muted cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+            onClick={handleStopSharing}
+            disabled={!url || revoking}
+            className="text-error-text hover:bg-error-bg flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold disabled:opacity-60"
           >
-            Done
+            {revoking && <Loader2 className="h-4 w-4 animate-spin" />}
+            Stop sharing
           </button>
-          <button
-            type="button"
-            onClick={handleCopy}
-            disabled={!url}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
-          >
-            {copied ? (
-              <>
-                <Check className="h-4 w-4" />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" />
-                Copy link
-              </>
-            )}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-foreground hover:bg-surface-muted cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+            >
+              Done
+            </button>
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={!url}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  Copy link
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

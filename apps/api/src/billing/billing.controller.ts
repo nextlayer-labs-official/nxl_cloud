@@ -3,7 +3,8 @@ import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { SessionGuard } from "../auth/guards/session.guard";
 import { BillingService } from "./billing.service";
-import { CreateCheckoutSessionDto } from "./dto/create-checkout-session.dto";
+import { CreateOrderDto } from "./dto/create-order.dto";
+import { VerifyPaymentDto } from "./dto/verify-payment.dto";
 
 @Controller("billing")
 export class BillingController {
@@ -20,23 +21,29 @@ export class BillingController {
     return this.billing.getSubscription(req.user!.id);
   }
 
-  @Post("checkout")
+  @Post("order")
   @UseGuards(SessionGuard)
-  createCheckout(@Req() req: Request, @Body() dto: CreateCheckoutSessionDto) {
-    return this.billing.createCheckoutSession(req.user!.id, dto);
+  createOrder(@Req() req: Request, @Body() dto: CreateOrderDto) {
+    return this.billing.createOrder(req.user!.id, dto);
   }
 
-  @Post("portal")
+  @Post("verify")
   @UseGuards(SessionGuard)
-  createPortal(@Req() req: Request) {
-    return this.billing.createPortalSession(req.user!.id);
+  verifyPayment(@Req() req: Request, @Body() dto: VerifyPaymentDto) {
+    return this.billing.verifyPayment(req.user!.id, dto);
   }
 
-  /** No SessionGuard — Stripe calls this server-to-server with no session cookie. */
+  @Get("transactions")
+  @UseGuards(SessionGuard)
+  listTransactions(@Req() req: Request) {
+    return this.billing.listTransactions(req.user!.id);
+  }
+
+  /** No SessionGuard — Razorpay calls this server-to-server with no session cookie. */
   @Post("webhook")
   async handleWebhook(
     @Req() req: RawBodyRequest<Request>,
-    @Headers("stripe-signature") signature: string | undefined,
+    @Headers("x-razorpay-signature") signature: string | undefined,
   ) {
     await this.billing.handleWebhook(req.rawBody!, signature);
     return { received: true };

@@ -39,4 +39,10 @@ export class FoldersController {
   createShareLink(@Req() req: Request, @Param("id") id: string) {
     return this.foldersService.createShareLink(req.user!.id, id);
   }
+
+  @Delete(":id/share")
+  async removeShareLink(@Req() req: Request, @Param("id") id: string) {
+    await this.foldersService.removeShareLink(req.user!.id, id);
+    return { success: true };
+  }
 }

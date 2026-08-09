@@ -108,8 +108,8 @@ compiled CommonJS rather than raw TypeScript).
   delete (confirmed the object actually disappears from the bucket, not just the
   DB row) — all tested via curl and then again through the real browser UI
   (upload → share → public `/share/[token]` page in a logged-out context)
-- ⏳ Storage quota tracking — not done, deferred to Phase 7 (Billing) where it
-  actually matters
+- ✅ Storage quota tracking and enforcement — see Phase 8's admin-panel note;
+  landed 2026-08-09 once billing/admin had a place to configure limits
 - Note: real Wasabi credentials require **region-specific endpoints**
   (`s3.<region>.wasabisys.com`, not the generic `s3.wasabisys.com`) — using the
   generic endpoint for a non-`us-east-1` bucket causes auth failures even with
@@ -132,8 +132,17 @@ see the "not done" list for what's left.
   storage-usage indicator, nav, and user/logout
 - ✅ File browser: nested folder navigation with full breadcrumb trail, create
   folder, drag-and-drop or button upload (direct-to-Wasabi via presigned URL, live
-  per-file progress via XHR), download, per-file share link, delete (files and
-  empty folders), org-wide search across files/folders
+  per-file progress via XHR), download, per-file/folder share link, delete (files
+  and empty folders), org-wide search across files/folders
+- ✅ Share link lifecycle — creating a share link is idempotent (reuses the
+  existing active link for that resource instead of minting a new token every
+  time "Share" is clicked, via `share-link.util.ts` shared by
+  `files.service.ts`/`folders.service.ts`), a "Stop sharing" action in the
+  same modal revokes it (`DELETE /files|folders/:id/share`), and a small
+  link icon next to the file/folder name in the browser (both the main view
+  and search results) shows which items currently have an active share link
+  — previously there was no way to tell a resource was shared, or to un-share
+  it, short of going into the database directly.
 - ✅ In-app file previews (images, PDF, video/audio, text/code) via a
   `Content-Disposition: inline` presigned URL, separate from the attachment
   download URL
@@ -175,74 +184,222 @@ see the "not done" list for what's left.
   full access to everything in their org; the `Permission` table from Phase 2 isn't
   consulted anywhere yet
 
-## Phase 7 — Billing & Subscription — MVP ✅ done, unverified against a real Stripe account
+## Phase 7 — Billing & Subscription — MVP ✅ done (Razorpay), verified against a real test account
 
-Wires the existing `Plan`/`Subscription` models to real Stripe billing. Built
-against the Stripe API per the "no live keys yet" choice (same approach as Wasabi
-in Phase 5) — fully wired, but live-verified only once real keys are added.
+Wires the existing `Plan`/`Subscription` models to real billing. Originally built
+against Stripe; replaced with **Razorpay** on 2026-08-09 since the platform sells
+in India (INR pricing — see Phase 8's ₹ note) and Razorpay is the natural fit for
+UPI/cards there.
 
 - ✅ `apps/api/src/billing/` — `BillingService`/`BillingController` using the
-  `stripe` SDK (v22). Boots fine with no `STRIPE_SECRET_KEY` set; billing-specific
-  endpoints return a clear 503 instead of crashing, mirroring `StorageService`'s
-  pattern for missing Wasabi credentials.
-- ✅ `GET /billing/plans` — lists `Plan` rows (Starter/Business/Enterprise),
-  sorted by price ascending with `null` (Enterprise's "Contact us" custom pricing)
-  sorted last
+  `razorpay` SDK. Boots fine with no `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` set;
+  billing-specific endpoints return a clear 503 instead of crashing, mirroring
+  `StorageService`'s pattern for missing Wasabi credentials.
+- **Deliberate design choice: one-time charge per billing period (Razorpay
+  Orders API), not the Subscriptions API.** Razorpay auto-billing (mandates,
+  recurring auth-transactions) is meaningfully more moving parts than Stripe's
+  equivalent; renewal/expiry instead lives in `Subscription.currentPeriodEnd`,
+  which the admin panel can already view and edit directly (see Phase 8). No
+  hosted self-serve billing portal either — Razorpay has no direct equivalent
+  to Stripe's Billing Portal, so cancel/plan-change is admin-handled (also
+  Phase 8) rather than self-serve, at least for this pass.
+- ✅ `GET /billing/plans` — unchanged: lists `Plan` rows, sorted by price
+  ascending with `null` (Enterprise's "Contact us" custom pricing) sorted last
 - ✅ `GET /billing/subscription` — current org's subscription + plan
-- ✅ `POST /billing/checkout` — creates a Stripe Customer (first time) and a
-  Checkout Session using inline `price_data` (no pre-created Stripe Price objects
-  needed, since there's no real Stripe account to create them in yet)
-- ✅ `POST /billing/portal` — Stripe Billing Portal session for self-serve
-  cancel/payment-method/invoice management once a subscription exists — no
-  custom cancel/upgrade UI was built, deliberately, since Stripe's hosted portal
-  already covers it
-- ✅ `POST /billing/webhook` — verifies the Stripe signature (`rawBody: true` set
-  on the Nest app specifically for this route) and syncs `Subscription.status`/
-  `currentPeriodEnd` on `checkout.session.completed`, `customer.subscription.updated`,
-  `customer.subscription.deleted`, and `invoice.payment_failed`
-- ✅ `/portal/settings` — new "Plan & billing" section: current plan/status/renewal
-  date, a plan list with "Subscribe" (Starter/Business) or "Contact us" (Enterprise,
-  no self-serve price), and "Manage billing" once a Stripe customer exists
-- ✅ Verified in a real browser against the demo account: trial subscription reads
-  correctly ("Business · Trial · renews ..."), clicking Subscribe surfaces the
-  graceful "Billing isn't configured yet" message end-to-end (API → UI) rather
-  than failing silently or crashing
-- ⏳ **Not yet verified against a real Stripe account** — no live checkout,
-  webhook delivery, or portal session has actually been exercised. Needs
-  `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in `.env` (test mode is fine;
-  `.env.example` has setup notes, including using `stripe listen` for local
-  webhook forwarding) before that's provable.
+- ✅ `POST /billing/order` — creates a Razorpay Order for the selected plan at
+  the chosen billing cycle's price (paise), with
+  `notes: { organizationId, planId, billingCycle }` stored on the order itself
+  — the source of truth read back during verification, not trusted from the
+  client. `receipt` is a short random hex string, not an encoded org id —
+  Razorpay caps `receipt` at 40 chars, which the first version of this blew
+  past and got a 400 from Razorpay (`receipt: the length must be no more than
+  40`) the first time it was exercised against a real account.
+- ✅ `POST /billing/verify` — the frontend calls this immediately after the
+  Razorpay Checkout popup succeeds, passing back
+  `razorpay_order_id`/`razorpay_payment_id`/`razorpay_signature`. Verifies the
+  signature server-side via the SDK's `validatePaymentVerification`, re-fetches
+  the order to read its `notes` (never trusts a client-supplied planId), then
+  activates the subscription (`status: ACTIVE`, `currentPeriodEnd` extended by
+  the billing cycle length).
+- ✅ `POST /billing/webhook` — verifies the Razorpay signature (`x-razorpay-signature`
+  header, `rawBody: true` already enabled globally in `main.ts`) via the SDK's
+  `validateWebhookSignature`, and handles `payment.captured` (backup activation
+  path in case the client-side verify call never fires) and `payment.failed`
+  (marks `PAST_DUE`)
+- ✅ `Payment` model + `GET /billing/transactions` — one row per successfully
+  activated payment (amount, plan, billing cycle, timestamp), written inside
+  the same DB transaction as the `Subscription` upsert in `activateSubscription`
+  (shared by both the verify and webhook paths). Guarded by a
+  `razorpayPaymentId`-keyed idempotency check first — both paths can fire for
+  the same payment (client-side verify races the webhook), and without the
+  guard the second write would hit `Payment.razorpayPaymentId`'s unique
+  constraint and 500. Surfaced on `/portal/settings` as "Transaction history"
+  under the plan list.
+- ✅ Monthly/Annual toggle on `/portal/settings` — previously checkout was
+  hardcoded to `billingCycle: "MONTHLY"` with no yearly price ever shown or
+  selectable, even though `Plan.priceYearlyCents` existed. Now a pill toggle
+  (styled like the marketing Pricing page's) switches both the displayed price
+  and what `POST /billing/order` requests.
+- ✅ **Verified against a real Razorpay test account** (test-mode
+  `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` added to `.env`): `POST /billing/order`
+  creates a real order, clicking "Subscribe" in the browser opens the actual
+  Razorpay Checkout iframe with a live session token, and a validly-signed
+  `POST /billing/verify` call (signature computed the same way Razorpay itself
+  would, after fixing the `receipt` bug above) correctly activates the
+  subscription and writes a `Payment` row that shows up in the transaction
+  history UI. A full human-in-the-loop card payment (entering test card details
+  inside Razorpay's iframe) was not exercised. `RAZORPAY_WEBHOOK_SECRET` in
+  `.env` is currently an empty placeholder — the webhook path is unverified,
+  but non-blocking since it's only the defensive backup to client-side verify.
 - ⏳ Usage-based storage add-ons (the Pricing page shows these as line items) —
-  not implemented; would need per-org storage-quota enforcement first, which
-  Phase 5 explicitly deferred to this phase and still isn't done
+  still not implemented as a self-serve purchase flow, though the underlying
+  per-org storage-quota enforcement it would need now exists (Phase 8)
 - ⏳ Proration on plan switches, dunning/retry sequencing beyond marking
-  `PAST_DUE`, invoice history UI (Stripe's customer portal covers viewing past
-  invoices today, so this is low-priority)
+  `PAST_DUE`, invoice history UI — no self-serve portal to cover these, so
+  they'd all need custom UI if ever built
 - ⏳ Marketing Pricing page CTAs are unchanged — they still link to `/register`,
   not directly into checkout; billing is managed from `/portal/settings` after
   the free trial, not from the Pricing page itself
 
-## Phase 8 — Admin Portal
+## Phase 8 — Admin Portal — MVP ✅ done (integrated deployment, separate identity)
 
-Internal tooling — a **fully separate system** from the customer-facing platform, not
-just a gated route inside it. Decided 2026-08-09 after a first attempt (an `/admin`
-route inside `apps/web` sharing `apps/api`, gated by a `User.isAdmin` flag) was
-deliberately built and then fully removed: reusing the customer app/backend/user
-table for platform staff was rejected as the wrong shape — it conflates "customer"
-and "staff" in one identity/session/deployment, which real SaaS platforms avoid.
+Decided 2026-08-09 after a first attempt (an `/admin` route gated by a `User.isAdmin`
+flag on the customer's own account) was deliberately built and then fully removed —
+reusing the customer table for platform staff was rejected as the wrong shape. A
+second, fully-separate-apps design (`apps/admin` + `apps/admin-api` as their own
+deployable processes) was scoped but deferred; the version actually built takes the
+middle path requested the same day: **still deployed inside `apps/web`/`apps/api`,
+but with admin identity fully decoupled from customer identity from day one**, so
+splitting into separate apps later is a lift-and-shift of the `admin/` folders, not
+a data-model migration.
 
-Target shape for whenever this is picked up:
-
-- A separate `apps/admin` frontend and a separate `apps/admin-api` backend, each
-  their own deployable process — not routes bolted onto `apps/web`/`apps/api`.
-- Its own `AdminUser`/`AdminSession` database models, decoupled from the customer
-  `User`/`Session` tables — not a boolean flag on a customer account. Still reads
-  the same underlying database (orgs, subscriptions, files) since that's the one
-  source of truth, but admin identity and customer identity never share a table,
-  a session cookie, or a login form.
-- Org-wide management across all customers (support/ops view), plan overrides
-- Audit log review, impersonation-for-support (with proper guardrails)
-- Platform-level metrics/dashboards
+- ✅ `AdminUser`/`AdminSession` Prisma models — own table, own session cookie
+  (`admin_session_token`, distinct from the customer `session_token`), own login
+  form. No boolean flag anywhere on `User`. Seeded via `prisma/seed.ts`
+  (`admin@nextlayer.cloud`, password from `ADMIN_SEED_PASSWORD` env or a dev
+  default) since there's no signup flow for admins.
+- ✅ Backend: `apps/api/src/admin/` — self-contained module (`AdminAuthController`/
+  `AdminAuthService`/`AdminSessionGuard` for auth, `AdminController`/`AdminService`
+  for org management), imported into `AppModule` but otherwise untouched by the
+  customer-facing code. `GET/POST /admin/auth/*` for login/logout/me,
+  `GET /admin/organizations`, `POST .../suspend`, `POST .../reactivate`,
+  `PATCH .../subscription` (manual plan/status override, bypasses Stripe),
+  `GET /admin/audit-log`.
+- ✅ `Organization.suspendedAt` — enforced in both `AuthService.login` and the
+  customer-facing `SessionGuard` (not just at login), so suspending an org
+  immediately invalidates any of that org's existing sessions too.
+- ✅ Frontend: `apps/web/src/app/admin/` — `/admin/login` (separate page, reuses
+  `AuthShell`, posts to `/admin/auth/login`), `/admin` (organizations table:
+  owner, plan, status, members, storage, suspend/reactivate, plan override modal),
+  `/admin/audit-log`. Route-grouped so only the authenticated pages render
+  `AdminShell` — the login page stays outside the auth-gate to avoid a redirect
+  loop.
+- ✅ `POST /admin/customers` — admin creates a full customer account (User +
+  Organization + OWNER Membership + 14-day Business trial Subscription) in one
+  step, same shape as a real self-serve signup, for sales-assisted onboarding.
+  Shares the slug-generation logic with `AuthService.register` via
+  `organizations/slug.util.ts` rather than duplicating it.
+- ✅ Manual comp/discount fields on `Subscription` — `discountPercent` (0-100)
+  and `freeUntil` (a "comped until" date), admin-settable from the same plan
+  override modal (its help text now says "applies at their next
+  renewal/purchase — never retroactive to what they've already paid", since
+  that's exactly the confusion this caused the first time it shipped).
+  **Fixed 2026-08-09: `discountPercent` was purely cosmetic — `BillingService
+  .createOrder` never actually applied it to the Razorpay order amount, so a
+  customer would see a discounted price in the UI but still get charged full
+  price at checkout.** Now `createOrder` reduces `amount` by the org's
+  existing `discountPercent` before creating the order, so it's a real,
+  prospective discount honored at the customer's *next* checkout — regardless
+  of which plan they choose, since the discount is org-level, not tied to one
+  specific plan. On `/portal/settings`, the summary card reads "N% off will
+  apply at your next renewal" (previously "N% discount applied", which read
+  as already-in-effect on the currently-active, already-paid-for period), and
+  the discounted price now shows on every purchasable plan row — not just the
+  disabled "Current plan" one — since any of them would honor it.
+- ✅ `/admin/plans` — full CRUD on the `Plan` table itself (name, monthly/yearly
+  price, storage/seat limits, feature list), separate from per-org subscription
+  overrides. `GET/POST /admin/plans`, `PATCH/DELETE /admin/plans/:id`. Deleting
+  a plan still referenced by any `Subscription` is rejected with a clear
+  "in use by N organizations" error rather than a raw FK-constraint failure.
+  New/renamed plans show up immediately in the existing subscription-override
+  dropdown — no separate wiring needed since it already reads `/billing/plans`.
+- ✅ Billing cycle (Monthly/Annual) and renewal/expiry date (`currentPeriodEnd`)
+  are now editable from the same override modal — previously only settable
+  automatically (trial signup, Stripe webhook), with no admin path to correct
+  or extend them. The organizations table also shows "Renews ..." under each
+  org's status so the date is visible without opening the modal.
+- ✅ Admin plan pricing displays in ₹ (INR) instead of $ — this platform sells
+  in India. Applies to the admin plan list/form and the customer's
+  `/portal/settings` billing tab; the public marketing pricing/home pages and
+  Stripe checkout currency were deliberately left as-is (not requested).
+- ✅ Verified end-to-end in a real browser: unauthenticated `/admin` redirects to
+  `/admin/login`; login → organizations list; new customer creation → account
+  can immediately log in on the customer side; duplicate email rejected inline;
+  suspend Acme Labs → its owner's `/auth/login` immediately starts returning
+  401; reactivate → login works again; plan override (Business/ACTIVE →
+  Starter/PAST_DUE) reflected instantly in the table; discount/comp override
+  shows up both in the admin table and on the customer's billing tab; audit
+  log renders; logout → redirected, direct `/admin` access re-redirects.
+- Note: `prisma.subscription.upsert()` with an explicitly-`undefined` scalar
+  FK (`planId: undefined`) in the unused `create` branch throws
+  `PrismaClientValidationError` ("Argument `organization` is missing") at
+  runtime even though that branch never executes — Prisma can't resolve the
+  checked/unchecked create-input union in that case. Fixed by splitting
+  `updateSubscription` into explicit `update`/`create` calls instead of a
+  single `upsert`.
+- ✅ `/admin/organizations/[id]` — a dedicated per-organization detail page
+  (`GET /admin/organizations/:id`), since cramming everything into the list
+  row + modals stopped scaling once billing cycle, renewal date, discount/comp,
+  transaction history, and audit log all needed a place to live. Shows: org
+  overview (created date, member count, storage used), full subscription
+  detail with the same "Change plan" override modal reused from the list page
+  (refactored to a narrow `SubscriptionOverrideTarget` shape so it isn't
+  coupled to the list row's exact type), the complete members list with roles
+  (the list page's `owner` field only ever showed one person), transaction
+  history (`GET /admin/organizations/:id/transactions`), and an audit log
+  scoped to just that org (`GET /admin/audit-log` gained an optional
+  `?organizationId=` filter — same underlying query as the platform-wide
+  `/admin/audit-log` page, just filtered). Org names in the list table now
+  link here; suspend/reactivate and plan override work from either place.
+- ✅ Trial period is admin-manageable — it already was, technically (a
+  TRIALING subscription's `status` and `currentPeriodEnd` are just the same
+  fields the override modal edits), but the UI unconditionally labeled that
+  date "Renews ..." even for trials, which read as wrong/confusing. Now shows
+  "Trial ends ..." when `status === "TRIALING"`, in the customer's
+  `/portal/settings`, the admin organizations list, and the org detail page.
+- ✅ Per-org storage limit override + real enforcement — previously the
+  storage limit was purely cosmetic (a progress bar), inherited from the plan
+  with no way to grant one customer more or less, and never actually enforced
+  server-side. Added `Subscription.storageLimitGbOverride` (null = inherit the
+  plan's `storageLimitGb`), editable from the same override modal, and
+  `OrganizationsService.assertWithinQuota()` — called from
+  `FilesService.requestUploadUrl` (the client already sends `sizeBytes` when
+  requesting the presigned URL, so the check happens *before* anything is
+  uploaded to Wasabi, not after) — which rejects the upload with a clear
+  message once an org would exceed its effective limit. The customer-facing
+  storage bar in the portal sidebar picks up the override automatically since
+  it reads through the same `OrganizationsService.getUsage()`.
+- **Bug found and fixed while testing the above**: `AuthService.register` and
+  `AdminService.createCustomer` both picked the new-signup trial plan via
+  `prisma.plan.findFirst({ where: { name: "Business" } })` — a **name-based
+  lookup**, silently broken the moment that plan got renamed (which the admin
+  Plans page now lets you do freely). Concretely: **every signup since the
+  seeded "Business" plan was renamed — both real self-serve registrations and
+  admin-created customers — got no plan and no subscription at all**, with no
+  error surfaced anywhere. Fixed by adding `Plan.isDefault` (admin-settable
+  checkbox on the plan form, enforced server-side so at most one plan has it
+  set at a time) and switching both signup paths to look it up by that flag
+  instead of by name, with a creation-order fallback so signups never silently
+  no-op even if no plan is marked default. Repaired the live data by marking
+  the current "Plus" plan (ex-"Business") as default, and confirmed via a
+  fresh `createCustomer` call that new orgs now get a real `TRIALING`
+  subscription again.
+- ⏳ Impersonation-for-support, platform-level metrics/dashboards — not built,
+  out of scope for this pass.
+- ⏳ Splitting into fully separate `apps/admin`/`apps/admin-api` processes —
+  still the long-term target if/when it's warranted (e.g. separate deploy
+  cadence or access control from the customer app); not needed yet since
+  identity is already decoupled at the data layer.
 
 ## Phase 9 — Production Hardening & Launch
 

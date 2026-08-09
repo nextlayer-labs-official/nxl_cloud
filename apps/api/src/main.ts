@@ -5,7 +5,7 @@ import { AppModule } from "./app.module";
 
 async function bootstrap() {
   // rawBody: true exposes req.rawBody alongside the normal parsed req.body,
-  // needed for the Stripe webhook route to verify the payload signature.
+  // needed for the Razorpay webhook route to verify the payload signature.
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.use(cookieParser());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

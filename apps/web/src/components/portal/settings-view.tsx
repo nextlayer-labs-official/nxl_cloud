@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import type { Plan, SubscriptionInfo, SubscriptionStatus } from "@/types/portal";
+import type { Plan, SubscriptionInfo, SubscriptionStatus, Transaction } from "@/types/portal";
 import { usePortal } from "./portal-context";
 
 const STATUS_LABEL: Record<SubscriptionStatus, string> = {
@@ -16,8 +16,57 @@ const STATUS_LABEL: Record<SubscriptionStatus, string> = {
   CANCELED: "Canceled",
 };
 
-function formatPrice(cents: number | null): string {
-  return cents === null ? "Custom" : `$${(cents / 100).toFixed(2)}/mo`;
+type BillingCycle = "MONTHLY" | "ANNUAL";
+
+function priceForCycle(plan: Plan, cycle: BillingCycle): number | null {
+  return cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+}
+
+function formatPrice(cents: number | null, cycle: BillingCycle): string {
+  if (cents === null) return "Custom";
+  return `₹${(cents / 100).toFixed(2)}/${cycle === "ANNUAL" ? "yr" : "mo"}`;
+}
+
+interface RazorpayCheckoutResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+interface RazorpayCheckoutOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  order_id: string;
+  prefill?: { name?: string; email?: string };
+  theme?: { color?: string };
+  handler: (response: RazorpayCheckoutResponse) => void;
+  modal?: { ondismiss?: () => void };
+}
+
+interface RazorpayCheckoutInstance {
+  open: () => void;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => RazorpayCheckoutInstance;
+  }
+}
+
+function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
 }
 
 type SettingsTab = "profile" | "billing" | "security" | "danger";
@@ -86,11 +135,7 @@ export function SettingsView() {
 
   const requestedTab = searchParams.get("tab");
   const initialTab: SettingsTab =
-    requestedTab && TABS.some((t) => t.key === requestedTab)
-      ? (requestedTab as SettingsTab)
-      : searchParams.get("checkout")
-        ? "billing"
-        : "profile";
+    requestedTab && TABS.some((t) => t.key === requestedTab) ? (requestedTab as SettingsTab) : "profile";
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   const [name, setName] = useState(user.name);
@@ -111,48 +156,87 @@ export function SettingsView() {
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [billingLoading, setBillingLoading] = useState(true);
   const [billingActionError, setBillingActionError] = useState<string | null>(null);
   const [billingActionLoading, setBillingActionLoading] = useState<string | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState<string | null>(null);
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>("MONTHLY");
 
   useEffect(() => {
-    setCheckoutStatus(new URLSearchParams(window.location.search).get("checkout"));
     Promise.all([
       api.get<Plan[]>("/billing/plans"),
       api.get<SubscriptionInfo | null>("/billing/subscription"),
+      api.get<Transaction[]>("/billing/transactions"),
     ])
-      .then(([plansData, subscriptionData]) => {
+      .then(([plansData, subscriptionData, transactionsData]) => {
         setPlans(plansData);
         setSubscription(subscriptionData);
+        setTransactions(transactionsData);
       })
       .finally(() => setBillingLoading(false));
   }, []);
 
   async function handleSubscribe(planId: string) {
     setBillingActionError(null);
+    setCheckoutStatus(null);
     setBillingActionLoading(planId);
     try {
-      const { url } = await api.post<{ url: string }>("/billing/checkout", {
-        planId,
-        billingCycle: "MONTHLY",
-      });
-      window.location.href = url;
-    } catch (err) {
-      setBillingActionError(err instanceof ApiError ? err.message : "Couldn't start checkout.");
-      setBillingActionLoading(null);
-    }
-  }
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded || !window.Razorpay) {
+        throw new Error("Couldn't load the payment form. Check your connection and try again.");
+      }
 
-  async function handleManageBilling() {
-    setBillingActionError(null);
-    setBillingActionLoading("portal");
-    try {
-      const { url } = await api.post<{ url: string }>("/billing/portal");
-      window.location.href = url;
+      const order = await api.post<{
+        orderId: string;
+        amount: number;
+        currency: string;
+        keyId: string;
+      }>("/billing/order", { planId, billingCycle });
+
+      let completed = false;
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: "Nextlayer Cloud",
+        order_id: order.orderId,
+        prefill: { name: user.name, email: user.email },
+        theme: { color: "#2563eb" },
+        handler: async (response) => {
+          completed = true;
+          try {
+            await api.post("/billing/verify", {
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            });
+            const [updatedSubscription, updatedTransactions] = await Promise.all([
+              api.get<SubscriptionInfo | null>("/billing/subscription"),
+              api.get<Transaction[]>("/billing/transactions"),
+            ]);
+            setSubscription(updatedSubscription);
+            setTransactions(updatedTransactions);
+            setCheckoutStatus("success");
+          } catch {
+            setBillingActionError("Payment succeeded but we couldn't confirm it — contact support.");
+          } finally {
+            setBillingActionLoading(null);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            if (!completed) {
+              setCheckoutStatus("canceled");
+              setBillingActionLoading(null);
+            }
+          },
+        },
+      });
+      checkout.open();
     } catch (err) {
       setBillingActionError(
-        err instanceof ApiError ? err.message : "Couldn't open the billing portal.",
+        err instanceof ApiError ? err.message : (err as Error).message || "Couldn't start checkout.",
       );
       setBillingActionLoading(null);
     }
@@ -303,30 +387,58 @@ export function SettingsView() {
                 <div className="text-ink-450 text-[13px]">
                   {subscription ? STATUS_LABEL[subscription.status] : "—"}
                   {subscription?.currentPeriodEnd &&
-                    ` · renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`}
+                    ` · ${subscription.status === "TRIALING" ? "trial ends" : "renews"} ${new Date(subscription.currentPeriodEnd).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`}
                 </div>
+                {subscription?.freeUntil && new Date(subscription.freeUntil) > new Date() && (
+                  <div className="text-success mt-1 text-[13px] font-medium">
+                    Comped until{" "}
+                    {new Date(subscription.freeUntil).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </div>
+                )}
+                {!!subscription?.discountPercent && (
+                  <div className="text-success mt-1 text-[13px] font-medium">
+                    {subscription.discountPercent}% off will apply at your next renewal
+                  </div>
+                )}
               </div>
-              {subscription?.stripeCustomerId && (
-                <button
-                  type="button"
-                  onClick={handleManageBilling}
-                  disabled={billingActionLoading === "portal"}
-                  className="border-input text-foreground hover:bg-surface-muted flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-semibold disabled:opacity-60"
-                >
-                  {billingActionLoading === "portal" && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Manage billing
-                </button>
-              )}
             </div>
 
             {billingActionError && (
               <p className="text-error-text mb-4 text-[13px]">{billingActionError}</p>
             )}
 
+            <div className="bg-surface-muted mb-4 inline-flex items-center gap-1 rounded-full p-1">
+              {(["MONTHLY", "ANNUAL"] as const).map((cycle) => (
+                <button
+                  key={cycle}
+                  type="button"
+                  onClick={() => setBillingCycle(cycle)}
+                  className={cn(
+                    "cursor-pointer rounded-full px-4 py-1.5 text-[13px] font-semibold",
+                    billingCycle === cycle
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-ink-550 bg-transparent",
+                  )}
+                >
+                  {cycle === "MONTHLY" ? "Monthly" : "Annual"}
+                </button>
+              ))}
+            </div>
+
             <div className="flex flex-col gap-3">
               {plans.map((plan) => {
                 const isCurrent =
                   subscription?.plan.id === plan.id && subscription.status === "ACTIVE";
+                // The discount is org-level, not tied to the current plan specifically — it's
+                // honored at checkout regardless of which plan is purchased (see billing.service.ts
+                // createOrder), so show the real price on every purchasable row, not just the
+                // (non-actionable, already-paid-for) current one.
+                const discount = subscription?.discountPercent ?? null;
+                const price = priceForCycle(plan, billingCycle);
                 return (
                   <div
                     key={plan.id}
@@ -335,10 +447,19 @@ export function SettingsView() {
                     <div>
                       <div className="text-foreground text-[14px] font-semibold">{plan.name}</div>
                       <div className="text-ink-450 text-[13px]">
-                        {formatPrice(plan.priceMonthlyCents)}
+                        {discount && price !== null ? (
+                          <>
+                            <span className="line-through">{formatPrice(price, billingCycle)}</span>{" "}
+                            <span className="text-success font-medium">
+                              {formatPrice(Math.round((price * (100 - discount)) / 100), billingCycle)}
+                            </span>
+                          </>
+                        ) : (
+                          formatPrice(price, billingCycle)
+                        )}
                       </div>
                     </div>
-                    {plan.priceMonthlyCents === null ? (
+                    {price === null ? (
                       <Link
                         href="/contact"
                         className="border-input text-foreground hover:bg-surface-muted rounded-lg border px-3.5 py-2 text-sm font-semibold"
@@ -361,6 +482,35 @@ export function SettingsView() {
                   </div>
                 );
               })}
+            </div>
+
+            <div className="mt-8">
+              <h3 className="text-foreground mb-3 text-[14px] font-semibold">Transaction history</h3>
+              {transactions.length === 0 ? (
+                <p className="text-ink-450 text-[13px]">No transactions yet.</p>
+              ) : (
+                <div className="border-border-subtle divide-border-subtle divide-y overflow-hidden rounded-xl border">
+                  {transactions.map((tx) => (
+                    <div key={tx.id} className="flex items-center justify-between px-4 py-3 text-[13px]">
+                      <div>
+                        <div className="text-foreground font-medium">{tx.plan.name}</div>
+                        <div className="text-ink-450">
+                          {new Date(tx.createdAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                          {" · "}
+                          {tx.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
+                        </div>
+                      </div>
+                      <div className="text-foreground font-semibold">
+                        ₹{(tx.amountCents / 100).toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}

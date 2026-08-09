@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
+
+const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 @Injectable()
 export class OrganizationsService {
@@ -20,6 +22,14 @@ export class OrganizationsService {
     return membership;
   }
 
+  /** null = unlimited. Admin-set `storageLimitGbOverride` wins over the plan's default. */
+  private effectiveLimitBytes(
+    subscription: { storageLimitGbOverride: number | null; plan: { storageLimitGb: number | null } } | null,
+  ): number | null {
+    const gb = subscription?.storageLimitGbOverride ?? subscription?.plan.storageLimitGb ?? null;
+    return gb !== null ? gb * BYTES_PER_GB : null;
+  }
+
   async getUsage(userId: string) {
     const membership = await this.getPrimaryMembership(userId);
     const [usage, fileCount, subscription] = await Promise.all([
@@ -36,13 +46,36 @@ export class OrganizationsService {
       }),
     ]);
 
-    const storageLimitGb = subscription?.plan.storageLimitGb ?? null;
     return {
       usedBytes: usage._sum.sizeBytes ?? 0,
       fileCount,
-      // null = unlimited (Business/Enterprise plans have no storageLimitGb set).
-      limitBytes: storageLimitGb !== null ? storageLimitGb * 1024 * 1024 * 1024 : null,
+      limitBytes: this.effectiveLimitBytes(subscription),
       planName: subscription?.plan.name ?? null,
     };
+  }
+
+  /** Throws if uploading `additionalBytes` more would push the org over its effective storage limit. */
+  async assertWithinQuota(organizationId: string, additionalBytes: number) {
+    const [usage, subscription] = await Promise.all([
+      prisma.file.aggregate({
+        where: { organizationId, deletedAt: null },
+        _sum: { sizeBytes: true },
+      }),
+      prisma.subscription.findUnique({
+        where: { organizationId },
+        include: { plan: true },
+      }),
+    ]);
+
+    const limitBytes = this.effectiveLimitBytes(subscription);
+    if (limitBytes === null) return;
+
+    const usedBytes = usage._sum.sizeBytes ?? 0;
+    if (usedBytes + additionalBytes > limitBytes) {
+      const limitGb = (limitBytes / BYTES_PER_GB).toFixed(1);
+      throw new BadRequestException(
+        `This upload would exceed your storage limit (${limitGb} GB). Delete some files or contact support to increase your limit.`,
+      );
+    }
   }
 }

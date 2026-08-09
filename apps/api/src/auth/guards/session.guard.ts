@@ -15,11 +15,21 @@ export class SessionGuard implements CanActivate {
 
     const session = await prisma.session.findUnique({
       where: { sessionToken: token },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            memberships: { orderBy: { createdAt: "asc" }, take: 1, include: { organization: true } },
+          },
+        },
+      },
     });
 
     if (!session || session.expiresAt < new Date()) {
       throw new UnauthorizedException();
+    }
+
+    if (session.user.memberships[0]?.organization.suspendedAt) {
+      throw new UnauthorizedException("This account has been suspended.");
     }
 
     req.user = {

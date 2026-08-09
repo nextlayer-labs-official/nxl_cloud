@@ -12,6 +12,7 @@ import {
   Download,
   Folder as FolderIcon,
   Inbox,
+  Link2,
   SearchX,
   Share2,
   Trash2,
@@ -422,8 +423,16 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                           <NavIcon icon={FolderIcon} className="text-accent-foreground h-5 w-5" />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-foreground truncate text-[14px] font-medium">
-                            {folder.name}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-foreground truncate text-[14px] font-medium">
+                              {folder.name}
+                            </span>
+                            {folder.isShared && (
+                              <Link2
+                                className="text-ink-400 h-3.5 w-3.5 shrink-0"
+                                aria-label="Shared"
+                              />
+                            )}
                           </div>
                           <div className="text-ink-450 truncate text-[12px]">
                             in {folder.parentName}
@@ -485,6 +494,12 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                                 <span className="text-foreground truncate text-[14px] font-medium hover:underline">
                                   {file.name}
                                 </span>
+                                {file.isShared && (
+                                  <Link2
+                                    className="text-ink-400 h-3.5 w-3.5 shrink-0"
+                                    aria-label="Shared"
+                                  />
+                                )}
                               </div>
                             </td>
                             <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap sm:table-cell">
@@ -579,6 +594,9 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                       <span className="text-foreground truncate text-[14px] font-medium">
                         {folder.name}
                       </span>
+                      {folder.isShared && (
+                        <Link2 className="text-ink-400 h-3.5 w-3.5 shrink-0" aria-label="Shared" />
+                      )}
                     </Link>
                     <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
                       <button
@@ -681,6 +699,12 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                               <span className="text-foreground truncate text-[14px] font-medium hover:underline">
                                 {file.name}
                               </span>
+                              {file.isShared && (
+                                <Link2
+                                  className="text-ink-400 h-3.5 w-3.5 shrink-0"
+                                  aria-label="Shared"
+                                />
+                              )}
                               <span className="text-ink-450 text-[13px] sm:hidden">
                                 {formatBytes(file.sizeBytes)}
                               </span>
@@ -824,7 +848,16 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           resourceType={shareTarget.type}
           resourceId={shareTarget.id}
           resourceName={shareTarget.name}
-          onClose={() => setShareTarget(null)}
+          onClose={() => {
+            setShareTarget(null);
+            load();
+            if (isSearching) runSearch(searchQuery.trim());
+          }}
+          onRevoked={() => {
+            setShareTarget(null);
+            load();
+            if (isSearching) runSearch(searchQuery.trim());
+          }}
         />
       )}
     </div>

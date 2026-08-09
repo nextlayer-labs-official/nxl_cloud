@@ -72,12 +72,13 @@ model User {
 }
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  region    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  region      String?
+  suspendedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   memberships   Membership[]
   teams         Team[]
@@ -85,6 +86,7 @@ model Organization {
   files         File[]
   auditLogs     AuditLog[]
   subscription  Subscription?
+  payments      Payment[]
   ssoConnection SsoConnection?
 }
 
@@ -273,6 +275,34 @@ model Session {
   @@index([userId])
 }
 
+/// Platform staff, deliberately decoupled from `User`/`Session` — admin identity
+/// never shares a table, session cookie, or login form with customer accounts.
+/// Lives in its own `admin` module/folder on both apps so it can be lifted into
+/// a fully separate `apps/admin`/`apps/admin-api` later with minimal rework.
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  sessions AdminSession[]
+}
+
+model AdminSession {
+  id           String   @id @default(cuid())
+  adminUserId  String
+  sessionToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
+}
+
 /// Mirrors the 3 Pricing page tiers (Starter/Business/Enterprise).
 model Plan {
   id                String   @id @default(cuid())
@@ -282,10 +312,17 @@ model Plan {
   storageLimitGb    Int?
   seatLimit         Int?
   features          Json
+  /// The plan new signups trial by default. Admin-set — deliberately not
+  /// matched by `name` (e.g. "Business"), since plan names are renameable
+  /// from the admin panel and a name-based lookup silently breaks signups
+  /// the moment the plan is renamed. At most one Plan should have this true;
+  /// enforced in AdminService, not a DB constraint.
+  isDefault         Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   subscriptions Subscription[]
+  payments      Payment[]
 }
 
 model Subscription {
@@ -295,13 +332,44 @@ model Subscription {
   status               SubscriptionStatus @default(TRIALING)
   billingCycle         BillingCycle       @default(MONTHLY)
   currentPeriodEnd     DateTime?
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
+  /// Last Razorpay order created for this org's checkout (one-time charge per
+  /// billing period — see Phase 7 in docs/roadmap.md for why not Subscriptions).
+  razorpayOrderId      String?
+  razorpayPaymentId    String?
+  /// Admin-set discount off the plan's list price (0-100). Enforced by this
+  /// app's own price display, not a payment-gateway coupon.
+  discountPercent      Int?
+  /// Admin-set "comped" date — while in the future, the customer is treated
+  /// as fully paid regardless of `status`/billing, independent of `discountPercent`.
+  freeUntil            DateTime?
+  /// Admin-set per-org storage cap in GB, overriding the plan's default
+  /// (`Plan.storageLimitGb`). Null = inherit the plan's limit.
+  storageLimitGbOverride Int?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan         Plan         @relation(fields: [planId], references: [id])
+}
+
+/// One row per successfully-captured payment — the transaction history shown
+/// on /portal/settings. Separate from Subscription (which only tracks current
+/// state) since a subscription's history spans multiple payments over time.
+model Payment {
+  id                String       @id @default(cuid())
+  organizationId    String
+  planId            String
+  amountCents       Int
+  currency          String       @default("INR")
+  billingCycle      BillingCycle
+  razorpayOrderId   String
+  razorpayPaymentId String       @unique
+  createdAt         DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id])
+
+  @@index([organizationId, createdAt])
 }
 
 /// Lean, generic config rather than fully-specified SAML fields — Phase 4

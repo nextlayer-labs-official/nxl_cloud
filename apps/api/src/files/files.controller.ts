@@ -57,4 +57,10 @@ export class FilesController {
   createShareLink(@Req() req: Request, @Param("id") id: string) {
     return this.filesService.createShareLink(req.user!.id, id);
   }
+
+  @Delete(":id/share")
+  async removeShareLink(@Req() req: Request, @Param("id") id: string) {
+    await this.filesService.removeShareLink(req.user!.id, id);
+    return { success: true };
+  }
 }

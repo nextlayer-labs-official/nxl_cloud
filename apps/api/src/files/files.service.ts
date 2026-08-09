@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { OrganizationsService } from "../organizations/organizations.service";
+import { getOrCreateShareLink, revokeShareLink } from "../share/share-link.util";
 import { StorageService } from "../storage/storage.service";
 import type { ConfirmUploadDto } from "./dto/confirm-upload.dto";
 import type { RequestUploadUrlDto } from "./dto/request-upload-url.dto";
@@ -24,6 +24,7 @@ export class FilesService {
   async requestUploadUrl(userId: string, dto: RequestUploadUrlDto) {
     const membership = await this.organizations.getPrimaryMembership(userId);
     await this.assertFolderInOrg(dto.folderId, membership.organizationId);
+    await this.organizations.assertWithinQuota(membership.organizationId, dto.sizeBytes);
 
     const storageKey = this.storage.buildKey(membership.organization.slug, dto.name);
     const uploadUrl = await this.storage.getUploadUrl(storageKey, dto.mimeType);
@@ -122,16 +123,11 @@ export class FilesService {
 
   async createShareLink(userId: string, fileId: string) {
     const file = await this.getOwnedFile(userId, fileId);
-    const token = randomBytes(24).toString("hex");
-    await prisma.shareLink.create({
-      data: {
-        resourceType: "FILE",
-        resourceId: file.id,
-        token,
-        createdById: userId,
-      },
-    });
-    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
-    return { token, url: `${webOrigin}/share/${token}` };
+    return getOrCreateShareLink("FILE", file.id, userId);
+  }
+
+  async removeShareLink(userId: string, fileId: string) {
+    const file = await this.getOwnedFile(userId, fileId);
+    await revokeShareLink("FILE", file.id);
   }
 }
