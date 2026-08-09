@@ -54,7 +54,7 @@ export default function HomePage() {
                 Start free trial
               </Link>
               <Link
-                href="/enterprise"
+                href="/contact"
                 className="border-input text-foreground hover:border-ink-300 rounded-lg border px-7 py-3.5 text-base font-semibold"
               >
                 Talk to sales
@@ -288,7 +288,7 @@ export default function HomePage() {
           Start free trial
         </Link>
         <div className="mt-4">
-          <Link href="/enterprise" className="text-[15px]">
+          <Link href="/contact" className="text-[15px]">
             Talk to sales
           </Link>
         </div>

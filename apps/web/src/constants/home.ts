@@ -102,7 +102,7 @@ export const HOME_PRICING_TIERS: PricingTierData[] = [
     price: "Custom",
     features: ["Dedicated SLA", "Data residency options", "Custom contracts"],
     cta: "Contact sales",
-    ctaHref: "/enterprise",
+    ctaHref: "/contact",
     featured: false,
   },
 ];

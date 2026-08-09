@@ -25,7 +25,7 @@ export const PRICING_TIERS: RawPricingTier[] = [
     yearly: "Custom",
     features: ["Dedicated SLA", "Data residency options", "Custom contracts"],
     cta: "Contact sales",
-    ctaHref: "/enterprise",
+    ctaHref: "/contact",
     featured: false,
   },
 ];

@@ -15,14 +15,6 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
     ],
   },
   {
-    title: "Developers",
-    links: [
-      { label: "Documentation", href: "/documentation" },
-      { label: "Partners", href: "/partners" },
-      { label: "Status", href: "/status" },
-    ],
-  },
-  {
     title: "Company",
     links: [
       { label: "About", href: "/about" },

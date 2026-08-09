@@ -39,7 +39,7 @@ export function Footer({ variant, copyright = DEFAULT_COPYRIGHT }: FooterProps) 
   return (
     <footer className="border-border-subtle bg-surface-muted border-t px-10 pt-20 pb-10">
       <div className="mx-auto max-w-[1280px]">
-        <div className="mb-14 grid grid-cols-[1.4fr_repeat(4,1fr)] gap-10">
+        <div className="mb-14 grid grid-cols-[1.4fr_repeat(3,1fr)] gap-10">
           <div>
             <div className="mb-3 text-lg font-bold">Nextlayer Cloud</div>
             <p className="text-muted-foreground mb-5 max-w-[220px] text-sm">
