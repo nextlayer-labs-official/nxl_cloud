@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Download,
   Folder as FolderIcon,
+  FolderPlus,
   Inbox,
   Link2,
   SearchX,
@@ -21,17 +22,28 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
 import { getFileIcon } from "@/lib/file-icons";
-import { formatBytes, formatDate } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/types/portal";
+import { BulkActionToolbar } from "./bulk-action-toolbar";
 import { useRegisterBrowserActions } from "./browser-actions-context";
+import { FileCard } from "./file-card";
 import { FilePreviewModal } from "./file-preview-modal";
+import { FileRow } from "./file-row";
+import { FolderCard } from "./folder-card";
+import { FolderRow } from "./folder-row";
+import { ItemContextMenu } from "./item-context-menu";
 import { NavIcon } from "./nav-icon";
 import { NewFolderModal } from "./new-folder-modal";
 import { ShareModal } from "./share-modal";
+import { type SelectableItem, useSelection } from "./use-selection";
+import { useKeyboardShortcuts } from "./use-keyboard-shortcuts";
+import { ViewModeToggle, type ViewMode } from "./view-mode-toggle";
 
 const UPLOAD_FAILED_MESSAGE =
   "Upload to storage failed. If Wasabi credentials aren't configured yet (or the bucket's CORS policy doesn't allow this origin), this is expected.";
+
+const VIEW_MODE_STORAGE_KEY = "nxl-file-view-mode";
 
 interface UploadTask {
   id: string;
@@ -72,12 +84,24 @@ function summarizeUploads(uploads: UploadTask[]): string {
   return `${uploads.length} upload${uploads.length === 1 ? "" : "s"} complete`;
 }
 
+/** Downloads via a temporary <a download> click instead of window.open — handles a sequential multi-file loop without tripping popup blockers. */
+function triggerDownload(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 interface FileBrowserProps {
   folderId?: string;
 }
 
 export function FileBrowser({ folderId }: FileBrowserProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  const selection = useSelection();
 
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -101,7 +125,19 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     key: "name",
     dir: "asc",
   });
+  const [viewMode, setViewModeState] = useState<ViewMode>("list");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const dragCounter = useRef(0);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (stored === "grid" || stored === "list") setViewModeState(stored);
+  }, []);
+
+  function setViewMode(mode: ViewMode) {
+    setViewModeState(mode);
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  }
 
   // Search lives in the global top bar (PortalTopBar) — it drives navigation to
   // /portal?q=..., and this component just reacts to the URL, no local input.
@@ -167,6 +203,14 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reset selection only when navigating to a different folder — load() also
+  // runs after unrelated single-item actions (share, single delete), which
+  // shouldn't silently wipe the current selection.
+  useEffect(() => {
+    selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selection.clear is stable; only folderId should trigger this reset
+  }, [folderId]);
 
   async function handleCreateFolder(name: string) {
     setCreatingFolderError(null);
@@ -289,8 +333,82 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     }
   }
 
+  async function handleRename(type: "file" | "folder", id: string, name: string) {
+    setActionError(null);
+    try {
+      if (type === "file") {
+        const updated = await api.patch<{ name: string }>(`/files/${id}`, { name });
+        setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, name: updated.name } : f)));
+        setPreviewFile((prev) => (prev && prev.id === id ? { ...prev, name: updated.name } : prev));
+      } else {
+        const updated = await api.patch<{ name: string }>(`/folders/${id}`, { name });
+        setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name: updated.name } : f)));
+      }
+      setShareTarget((prev) => (prev && prev.id === id ? { ...prev, name } : prev));
+      if (isSearching) runSearch(searchQuery.trim());
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't rename.");
+    }
+  }
+
+  async function handleBulkDelete() {
+    const items = [...selection.selected.entries()];
+    if (items.length === 0) return;
+    if (!window.confirm(`Delete ${items.length} item${items.length === 1 ? "" : "s"}? This can't be undone.`))
+      return;
+    setActionError(null);
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        items.map(([id, type]) => (type === "file" ? api.delete(`/files/${id}`) : api.delete(`/folders/${id}`))),
+      );
+      const failedCount = results.filter((r) => r.status === "rejected").length;
+      if (failedCount > 0) {
+        setActionError(
+          `Deleted ${items.length - failedCount} of ${items.length} item(s). ${failedCount} failed — non-empty folders can't be deleted.`,
+        );
+      }
+      selection.clear();
+      load();
+      if (isSearching) runSearch(searchQuery.trim());
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkDownload() {
+    const fileIds = [...selection.selected.entries()]
+      .filter(([, type]) => type === "file")
+      .map(([id]) => id);
+    if (fileIds.length === 0) return;
+    setActionError(null);
+    setBulkBusy(true);
+    try {
+      for (const id of fileIds) {
+        try {
+          const { downloadUrl } = await api.get<{ downloadUrl: string }>(`/files/${id}/download-url`);
+          triggerDownload(downloadUrl);
+        } catch {
+          // best-effort — continue with the rest of the selection
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const isEmpty = !loading && folders.length === 0 && files.length === 0;
   const pageTitle = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "My Files";
+
+  const sortedFolders = useMemo(() => {
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...folders].sort((a, b) => {
+      if (sort.key === "date")
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+      return a.name.localeCompare(b.name) * dir; // folders have no size field — fall back to name
+    });
+  }, [folders, sort]);
 
   const sortedFiles = useMemo(() => {
     const dir = sort.dir === "asc" ? 1 : -1;
@@ -302,11 +420,37 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     });
   }, [files, sort]);
 
+  // Folders always precede files regardless of sort key — standard Explorer/Drive convention.
+  const allItems: SelectableItem[] = useMemo(
+    () => [
+      ...sortedFolders.map((f) => ({ id: f.id, type: "folder" as const })),
+      ...sortedFiles.map((f) => ({ id: f.id, type: "file" as const })),
+    ],
+    [sortedFolders, sortedFiles],
+  );
+
   function toggleSort(key: "name" | "size" | "date") {
     setSort((prev) =>
       prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" },
     );
   }
+
+  useKeyboardShortcuts({
+    enabled: !isSearching && !creatingFolder && !shareTarget && !previewFile && !loading,
+    onDelete: handleBulkDelete,
+    onSelectAll: () => selection.selectAll(allItems),
+    onEscape: () => selection.clear(),
+    onOpen: () => {
+      if (selection.count !== 1) return;
+      const [[id, type]] = selection.selected.entries();
+      if (type === "folder") {
+        router.push(`/portal/folder/${id}`);
+      } else {
+        const file = files.find((f) => f.id === id);
+        if (file) setPreviewFile(file);
+      }
+    },
+  });
 
   return (
     <div
@@ -361,6 +505,21 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           </div>
         </div>
 
+        {!isSearching && !loading && !isEmpty && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                selection.count === allItems.length ? selection.clear() : selection.selectAll(allItems)
+              }
+              className="text-ink-600 hover:bg-surface-muted cursor-pointer rounded-lg px-3 py-1.5 text-[13px] font-semibold"
+            >
+              {selection.count === allItems.length && allItems.length > 0 ? "Deselect all" : "Select all"}
+            </button>
+            <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+          </div>
+        )}
+
         <input ref={fileInputRef} type="file" hidden multiple onChange={handleUpload} />
       </div>
 
@@ -392,6 +551,15 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
         </div>
       )}
 
+      {!isSearching && selection.count > 0 && (
+        <BulkActionToolbar
+          count={selection.count}
+          busy={bulkBusy}
+          onClear={selection.clear}
+          onDownload={handleBulkDownload}
+          onDelete={handleBulkDelete}
+        />
+      )}
 
       {isSearching ? (
         searching && !searchResults ? (
@@ -558,203 +726,155 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           <div className="bg-surface-muted h-56 animate-pulse rounded-xl" />
         </div>
       ) : isEmpty ? (
-        <div className="border-border-subtle flex flex-col items-center rounded-xl border border-dashed py-20 text-center">
-          <div className="bg-surface-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
-            <Inbox className="text-ink-400 h-6 w-6" />
+        <ItemContextMenu
+          actions={[
+            { label: "New folder", icon: FolderPlus, onSelect: () => setCreatingFolder(true) },
+            { label: "Upload file", icon: Upload, onSelect: () => fileInputRef.current?.click() },
+          ]}
+        >
+          <div className="border-border-subtle flex flex-col items-center rounded-xl border border-dashed py-20 text-center">
+            <div className="bg-surface-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+              <Inbox className="text-ink-400 h-6 w-6" />
+            </div>
+            <p className="text-foreground text-[15px] font-semibold">This folder is empty</p>
+            <p className="text-ink-450 mt-1 text-sm">
+              Drag and drop files here, or use the buttons above.
+            </p>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 mt-5 cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+            >
+              Upload a file
+            </button>
           </div>
-          <p className="text-foreground text-[15px] font-semibold">This folder is empty</p>
-          <p className="text-ink-450 mt-1 text-sm">
-            Drag and drop files here, or use the buttons above.
-          </p>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 mt-5 cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
-          >
-            Upload a file
-          </button>
+        </ItemContextMenu>
+      ) : viewMode === "grid" ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {sortedFolders.map((folder, i) => (
+            <FolderCard
+              key={folder.id}
+              folder={folder}
+              selected={selection.isSelected(folder.id)}
+              onSelectAttempt={(e) =>
+                selection.handleItemClick({ id: folder.id, type: "folder" }, i, allItems, e)
+              }
+              onToggleCheckbox={() => selection.toggle({ id: folder.id, type: "folder" }, i)}
+              onShare={() => setShareTarget({ type: "folder", id: folder.id, name: folder.name })}
+              onDelete={() => handleDeleteFolder(folder)}
+              onRename={(name) => handleRename("folder", folder.id, name)}
+            />
+          ))}
+          {sortedFiles.map((file, j) => {
+            const index = sortedFolders.length + j;
+            return (
+              <FileCard
+                key={file.id}
+                file={file}
+                selected={selection.isSelected(file.id)}
+                onSelectAttempt={(e) =>
+                  selection.handleItemClick({ id: file.id, type: "file" }, index, allItems, e)
+                }
+                onToggleCheckbox={() => selection.toggle({ id: file.id, type: "file" }, index)}
+                onOpen={() => setPreviewFile(file)}
+                onDownload={() => handleDownload(file)}
+                onShare={() => setShareTarget({ type: "file", id: file.id, name: file.name })}
+                onDelete={() => handleDeleteFile(file)}
+                onRename={(name) => handleRename("file", file.id, name)}
+              />
+            );
+          })}
         </div>
       ) : (
-        <>
-          {folders.length > 0 && (
-            <div className="mb-8">
-              <h2 className="text-ink-450 mb-3 text-xs font-semibold tracking-wide uppercase">
-                Folders
-              </h2>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {folders.map((folder) => (
-                  <div key={folder.id} className="group relative">
-                    <Link
-                      href={`/portal/folder/${folder.id}`}
-                      className="border-border-subtle bg-background hover:border-border-strong hover:shadow-[0_8px_20px_-12px_oklch(0.22_0.02_260_/_0.2)] flex items-center gap-3 rounded-xl border p-4 transition"
-                    >
-                      <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-                        <NavIcon icon={FolderIcon} className="text-accent-foreground h-5 w-5" />
-                      </div>
-                      <span className="text-foreground truncate text-[14px] font-medium">
-                        {folder.name}
-                      </span>
-                      {folder.isShared && (
-                        <Link2 className="text-ink-400 h-3.5 w-3.5 shrink-0" aria-label="Shared" />
-                      )}
-                    </Link>
-                    <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setShareTarget({ type: "folder", id: folder.id, name: folder.name });
-                        }}
-                        aria-label={`Share ${folder.name}`}
-                        className="text-ink-400 hover:text-primary bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
-                      >
-                        <Share2 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleDeleteFolder(folder);
-                        }}
-                        aria-label={`Delete ${folder.name}`}
-                        className="text-ink-400 hover:text-error-text bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {files.length > 0 && (
-            <div>
-              <h2 className="text-ink-450 mb-3 text-xs font-semibold tracking-wide uppercase">
-                Files
-              </h2>
-              <div className="border-border-subtle overflow-hidden rounded-xl border">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-border-subtle bg-surface-muted-2 border-b">
-                      <th className="px-5 py-2.5">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("name")}
-                          className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
-                        >
-                          Name
-                          {sort.key === "name" &&
-                            (sort.dir === "asc" ? (
-                              <ChevronUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </th>
-                      <th className="hidden px-5 py-2.5 sm:table-cell">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("size")}
-                          className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
-                        >
-                          Size
-                          {sort.key === "size" &&
-                            (sort.dir === "asc" ? (
-                              <ChevronUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </th>
-                      <th className="hidden px-5 py-2.5 md:table-cell">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("date")}
-                          className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
-                        >
-                          Uploaded
-                          {sort.key === "date" &&
-                            (sort.dir === "asc" ? (
-                              <ChevronUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </th>
-                      <th className="px-5 py-2.5" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedFiles.map((file) => {
-                      const Icon = getFileIcon(file.mimeType);
-                      return (
-                        <tr
-                          key={file.id}
-                          className="group border-border-subtle hover:bg-surface-muted-2 border-b last:border-b-0"
-                        >
-                          <td className="cursor-pointer px-5 py-3" onClick={() => setPreviewFile(file)}>
-                            <div className="flex items-center gap-3">
-                              <Icon className="text-ink-400 h-[18px] w-[18px] shrink-0" />
-                              <span className="text-foreground truncate text-[14px] font-medium hover:underline">
-                                {file.name}
-                              </span>
-                              {file.isShared && (
-                                <Link2
-                                  className="text-ink-400 h-3.5 w-3.5 shrink-0"
-                                  aria-label="Shared"
-                                />
-                              )}
-                              <span className="text-ink-450 text-[13px] sm:hidden">
-                                {formatBytes(file.sizeBytes)}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap sm:table-cell">
-                            {formatBytes(file.sizeBytes)}
-                          </td>
-                          <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap md:table-cell">
-                            {formatDate(file.createdAt)}
-                          </td>
-                          <td className="px-5 py-3">
-                            <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-                              <button
-                                type="button"
-                                onClick={() => handleDownload(file)}
-                                className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
-                                aria-label={`Download ${file.name}`}
-                              >
-                                <Download className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setShareTarget({ type: "file", id: file.id, name: file.name })
-                                }
-                                className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
-                                aria-label={`Share ${file.name}`}
-                              >
-                                <Share2 className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteFile(file)}
-                                className="text-ink-400 hover:text-error-text hover:bg-background cursor-pointer rounded-md p-1.5"
-                                aria-label={`Delete ${file.name}`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </>
+        <div className="border-border-subtle overflow-hidden rounded-xl border">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-border-subtle bg-surface-muted-2 border-b">
+                <th className="px-5 py-2.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort("name")}
+                    className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
+                  >
+                    Name
+                    {sort.key === "name" &&
+                      (sort.dir === "asc" ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ))}
+                  </button>
+                </th>
+                <th className="hidden px-5 py-2.5 sm:table-cell">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort("size")}
+                    className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
+                  >
+                    Size
+                    {sort.key === "size" &&
+                      (sort.dir === "asc" ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ))}
+                  </button>
+                </th>
+                <th className="hidden px-5 py-2.5 md:table-cell">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort("date")}
+                    className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
+                  >
+                    Uploaded
+                    {sort.key === "date" &&
+                      (sort.dir === "asc" ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ))}
+                  </button>
+                </th>
+                <th className="px-5 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedFolders.map((folder, i) => (
+                <FolderRow
+                  key={folder.id}
+                  folder={folder}
+                  selected={selection.isSelected(folder.id)}
+                  onSelectAttempt={(e) =>
+                    selection.handleItemClick({ id: folder.id, type: "folder" }, i, allItems, e)
+                  }
+                  onToggleCheckbox={() => selection.toggle({ id: folder.id, type: "folder" }, i)}
+                  onShare={() => setShareTarget({ type: "folder", id: folder.id, name: folder.name })}
+                  onDelete={() => handleDeleteFolder(folder)}
+                  onRename={(name) => handleRename("folder", folder.id, name)}
+                />
+              ))}
+              {sortedFiles.map((file, j) => {
+                const index = sortedFolders.length + j;
+                return (
+                  <FileRow
+                    key={file.id}
+                    file={file}
+                    selected={selection.isSelected(file.id)}
+                    onSelectAttempt={(e) =>
+                      selection.handleItemClick({ id: file.id, type: "file" }, index, allItems, e)
+                    }
+                    onToggleCheckbox={() => selection.toggle({ id: file.id, type: "file" }, index)}
+                    onOpen={() => setPreviewFile(file)}
+                    onDownload={() => handleDownload(file)}
+                    onShare={() => setShareTarget({ type: "file", id: file.id, name: file.name })}
+                    onDelete={() => handleDeleteFile(file)}
+                    onRename={(name) => handleRename("file", file.id, name)}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {dragActive && (

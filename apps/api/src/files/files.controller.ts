@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import { SessionGuard } from "../auth/guards/session.guard";
 import { ConfirmUploadDto } from "./dto/confirm-upload.dto";
+import { RenameFileDto } from "./dto/rename-file.dto";
 import { RequestUploadUrlDto } from "./dto/request-upload-url.dto";
 import { FilesService } from "./files.service";
 
@@ -39,6 +40,11 @@ export class FilesController {
   async remove(@Req() req: Request, @Param("id") id: string) {
     await this.filesService.remove(req.user!.id, id);
     return { success: true };
+  }
+
+  @Patch(":id")
+  rename(@Req() req: Request, @Param("id") id: string, @Body() dto: RenameFileDto) {
+    return this.filesService.rename(req.user!.id, id, dto);
   }
 
   @Post(":id/restore")

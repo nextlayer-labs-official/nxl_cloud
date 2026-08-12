@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import { SessionGuard } from "../auth/guards/session.guard";
 import { CreateFolderDto } from "./dto/create-folder.dto";
+import { RenameFolderDto } from "./dto/rename-folder.dto";
 import { FoldersService } from "./folders.service";
 
 @Controller("folders")
@@ -33,6 +34,11 @@ export class FoldersController {
   async remove(@Req() req: Request, @Param("id") id: string) {
     await this.foldersService.remove(req.user!.id, id);
     return { success: true };
+  }
+
+  @Patch(":id")
+  rename(@Req() req: Request, @Param("id") id: string, @Body() dto: RenameFolderDto) {
+    return this.foldersService.rename(req.user!.id, id, dto);
   }
 
   @Post(":id/share")

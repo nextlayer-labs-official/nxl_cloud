@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { getOrCreateShareLink, revokeShareLink } from "../share/share-link.util";
 import { StorageService } from "../storage/storage.service";
 import type { ConfirmUploadDto } from "./dto/confirm-upload.dto";
+import type { RenameFileDto } from "./dto/rename-file.dto";
 import type { RequestUploadUrlDto } from "./dto/request-upload-url.dto";
 
 @Injectable()
@@ -91,6 +92,13 @@ export class FilesService {
   async remove(userId: string, fileId: string) {
     const file = await this.getOwnedFile(userId, fileId);
     await prisma.file.update({ where: { id: file.id }, data: { deletedAt: new Date() } });
+  }
+
+  async rename(userId: string, fileId: string, dto: RenameFileDto) {
+    const file = await this.getOwnedFile(userId, fileId);
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException("Name can't be empty.");
+    return prisma.file.update({ where: { id: file.id }, data: { name } });
   }
 
   private async getTrashedFile(userId: string, fileId: string) {

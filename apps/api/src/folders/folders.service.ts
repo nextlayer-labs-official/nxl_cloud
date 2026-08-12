@@ -3,6 +3,7 @@ import { prisma } from "@nextlayer/database";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { activeShareResourceIds, getOrCreateShareLink, revokeShareLink } from "../share/share-link.util";
 import type { CreateFolderDto } from "./dto/create-folder.dto";
+import type { RenameFolderDto } from "./dto/rename-folder.dto";
 
 @Injectable()
 export class FoldersService {
@@ -159,6 +160,13 @@ export class FoldersService {
   async removeShareLink(userId: string, folderId: string) {
     const folder = await this.getOwnedFolder(userId, folderId);
     await revokeShareLink("FOLDER", folder.id);
+  }
+
+  async rename(userId: string, folderId: string, dto: RenameFolderDto) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException("Name can't be empty.");
+    return prisma.folder.update({ where: { id: folder.id }, data: { name } });
   }
 
   async remove(userId: string, folderId: string) {
