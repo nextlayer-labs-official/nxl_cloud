@@ -254,43 +254,59 @@ UPI/cards there.
 - ⏳ Usage-based storage add-ons (the Pricing page shows these as line items) —
   still not implemented as a self-serve purchase flow, though the underlying
   per-org storage-quota enforcement it would need now exists (Phase 8)
-- ✅ Upgrade/downgrade mid-cycle (2026-08-09) — previously switching to *any*
-  other plan, higher or lower, went through the same path: full price charged
-  immediately, plan switched immediately, `currentPeriodEnd` reset to a fresh
-  period from today — silently discarding whatever paid time was left on the
-  old plan, with no distinction between upgrading and downgrading. Deliberately
-  **not** full proration (no partial-period credit/charge math, no mid-cycle
-  refunds) — a simpler rule instead:
-  - **Upgrades** (`Plan.priceMonthlyCents` higher than the current plan's):
-    unchanged — immediate, full price, right away.
-  - **Downgrades**: no charge and no immediate switch. `POST /billing/order`
-    detects it (existing subscription is `ACTIVE` with a future
-    `currentPeriodEnd` and the target plan is cheaper) and instead stores
-    `Subscription.pendingPlanId`/`pendingBillingCycle`, returning
-    `{ scheduled: true, effectiveDate, planName }` — the frontend shows
-    "Downgrade scheduled" and never opens the Razorpay checkout. The org keeps
-    its current (already-paid-for) plan until `currentPeriodEnd`.
-  - Since this app has no cron/job scheduler, the switch isn't pushed by a
-    background job — `applyDuePendingChange()` (`billing/subscription-lifecycle
-    .util.ts`) applies it lazily, the next time the subscription is actually
-    read (`getSubscription`, admin's `getOrganization`), once
-    `currentPeriodEnd` has passed. No new charge happens at that point either
-    — the org would need to actively resubscribe/renew like anyone else, same
-    as this app already works for everyone (there's no auto-billing engine).
-  - A pending downgrade is superseded by whatever supersedes it: a fresh
-    purchase (`activateSubscription` clears `pendingPlanId` on any new
-    payment), an explicit customer cancel (`POST /billing/cancel-pending-change`,
-    a "Cancel" link next to "Switching to X on renewal" in
-    `/portal/settings`), or an admin override (`AdminService.updateSubscription`
-    always clears it — a direct admin decision wins over a queued one).
-  - Surfaced in the admin organizations list (`Pro → Plus on renewal`) and org
-    detail page too, not just the customer's own settings page.
-  - Verified end-to-end: downgrade request returns `scheduled: true` with no
-    Razorpay order created; upgrade request (even with paid time remaining)
-    still returns a real order; canceling a pending downgrade restores the
-    normal "Subscribe" button; backdating `currentPeriodEnd` and re-fetching
-    the subscription correctly auto-applies the pending plan; admin override
-    clears a pending downgrade.
+- ✅ Real day-based proration on mid-cycle plan switches (2026-08-12) —
+  supersedes the "downgrade scheduled for renewal" mechanism above (built
+  2026-08-09, replaced three days later): the "scheduled" approach avoided
+  proration math entirely but meant downgrades took effect weeks later and
+  upgrades still charged full price even with paid time remaining on the old
+  plan — not what any real billing provider does. Replaced with immediate
+  switching (no more "scheduled" state, `Subscription.pendingPlanId`/
+  `pendingBillingCycle` and `subscription-lifecycle.util.ts` all removed) plus
+  real proration:
+  - `POST /billing/order` detects a plan switch (existing subscription
+    `ACTIVE`, `currentPeriodEnd` in the future, target plan differs from the
+    current one — same-plan renewals are explicitly excluded, see below) and
+    computes `unusedOldValue = oldListPrice × daysRemaining / cycleDays` and
+    `proratedNewCost = newListPrice × daysRemaining / cycleDays`, then
+    `net = proratedNewCost − unusedOldValue` (any active `discountPercent` is
+    applied to a positive `net` only — never to the credit side).
+  - If `net` minus the org's existing `Subscription.creditBalanceCents` is
+    `≤ 0`, the plan switches **immediately with no Razorpay order** — the
+    difference is added to (or drawn from) the credit balance and the
+    response carries `{ requiresPayment: false, creditBalanceCents }` so the
+    frontend can skip Checkout entirely. Otherwise a real Razorpay order is
+    created for just the reduced (credit-adjusted) amount.
+  - `currentPeriodEnd` and `billingCycle` are **preserved** across a prorated
+    switch (unlike a fresh purchase/renewal, which always gets a new full
+    period from today) — the customer's billing anniversary doesn't move
+    just because they switched plans mid-cycle.
+  - `creditBalanceCents` is a simple ledger, not a wallet: applied
+    automatically to the next charge, adjustable by admins directly
+    (`AdminService.updateSubscription`, "Account credit ₹" in the override
+    modal), never paid out or refunded outright.
+  - Fixed a latent bug in the same change: `Payment.amountCents` (transaction
+    history) previously always recorded the plan's full list price, even when
+    a discount or proration had reduced what was actually charged.
+    `activateSubscription` now takes the real charged amount (`order.amount`
+    from Razorpay) as an explicit parameter instead of re-deriving it.
+  - Verified end-to-end against the real Razorpay test API (`rzp_test_...`
+    keys in `.env`, order creation over the network, no mocking): trial → paid
+    upgrade (full price, not prorated — proration only applies to already-
+    `ACTIVE` subscriptions); downgrade with a full period remaining (immediate
+    free switch, correct credit granted); upgrade immediately after with that
+    credit exactly covering the cost (immediate free switch back, credit
+    zeroed); upgrade with only partial credit (real Razorpay order for the
+    reduced amount, transaction history correctly shows the reduced amount
+    rather than list price); same-plan "Renew" while `ACTIVE` (normal full-
+    price order, not misclassified as a switch); discount applied on top of a
+    prorated (not just fresh-purchase) charge; admin view/set of
+    `creditBalanceCents` from both the org list and org detail pages.
+    Payment verification was exercised by computing the HMAC signature
+    directly against the test key secret (same algorithm
+    `validatePaymentVerification` checks) rather than driving Razorpay's
+    hosted Checkout UI through a browser, since no browser-automation tool
+    was available in that session — the webhook path itself remains
+    unverified (see below), same as before this change.
 - ✅ Self-serve renewal (2026-08-09) — there was no automated renewal to begin
   with (no cron, no Razorpay Subscriptions — see the design note above), which
   is fine by design, but the customer's own current plan's button was
@@ -307,9 +323,9 @@ UPI/cards there.
   Deliberately still no automatic enforcement when a period lapses unrenewed
   (per the same product decision as the pending-downgrade note above) —
   status stays `ACTIVE` and access is unaffected either way.
-- ⏳ Full proration, dunning/retry sequencing beyond marking `PAST_DUE`,
-  invoice history UI — no self-serve portal to cover these, so they'd all need
-  custom UI if ever built
+- ⏳ Dunning/retry sequencing beyond marking `PAST_DUE`, invoice history UI —
+  no self-serve portal to cover these, so they'd all need custom UI if ever
+  built
 - ⏳ Marketing Pricing page CTAs are unchanged — they still link to `/register`,
   not directly into checkout; billing is managed from `/portal/settings` after
   the free trial, not from the Pricing page itself

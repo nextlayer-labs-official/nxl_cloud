@@ -6,23 +6,28 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { prisma, type BillingCycle } from "@nextlayer/database";
+import { prisma, type BillingCycle, type Plan, type Subscription } from "@nextlayer/database";
 import Razorpay from "razorpay";
 import { validatePaymentVerification, validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils";
 import { OrganizationsService } from "../organizations/organizations.service";
 import type { CreateOrderDto } from "./dto/create-order.dto";
 import type { VerifyPaymentDto } from "./dto/verify-payment.dto";
-import { applyDuePendingChange } from "./subscription-lifecycle.util";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
 const PERIOD_MS: Record<BillingCycle, number> = {
-  MONTHLY: 30 * 24 * 60 * 60 * 1000,
-  ANNUAL: 365 * 24 * 60 * 60 * 1000,
+  MONTHLY: 30 * DAY_MS,
+  ANNUAL: 365 * DAY_MS,
 };
+const CYCLE_DAYS: Record<BillingCycle, number> = { MONTHLY: 30, ANNUAL: 365 };
 
 interface OrderNotes {
   organizationId?: string;
   planId?: string;
   billingCycle?: string;
+  /** "true" for a prorated mid-cycle plan switch — preserves the existing period
+   *  instead of starting a fresh one, since the customer already paid for it. */
+  prorated?: string;
+  preservePeriodEnd?: string;
 }
 
 @Injectable()
@@ -57,55 +62,43 @@ export class BillingService {
 
   async getSubscription(userId: string) {
     const membership = await this.organizations.getPrimaryMembership(userId);
-    await applyDuePendingChange(membership.organizationId);
     return prisma.subscription.findUnique({
       where: { organizationId: membership.organizationId },
-      include: { plan: true, pendingPlan: true },
+      include: { plan: true },
     });
   }
 
   /**
-   * Upgrades are immediate: charged in full and switched right away. Downgrades are
-   * scheduled instead — no charge, no immediate switch. The org keeps its current
-   * (already-paid-for) plan until `currentPeriodEnd`, at which point
-   * `applyDuePendingChange` flips it over. "Downgrade" is judged by comparing
-   * `priceMonthlyCents` regardless of which cycle is being requested, so it stays a
-   * stable ranking even if someone switches cycles at the same time.
+   * Same plan (renewal) or a fresh/first purchase: full price, charged immediately,
+   * fresh `currentPeriodEnd` from today. A genuine mid-cycle switch to a *different*
+   * plan while there's still paid time left goes through `createProratedSwitchOrder`
+   * instead — real day-based proration, not the "upgrade full price / downgrade
+   * scheduled for renewal" rule this replaced.
    */
   async createOrder(userId: string, dto: CreateOrderDto) {
     const membership = await this.organizations.getPrimaryMembership(userId);
-    await applyDuePendingChange(membership.organizationId);
 
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
-
-    const listPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
-    if (!listPrice) {
-      throw new BadRequestException("This plan isn't available for self-serve checkout.");
-    }
 
     const existingSubscription = await prisma.subscription.findUnique({
       where: { organizationId: membership.organizationId },
       include: { plan: true },
     });
 
-    const isDowngrade =
+    const isPlanSwitch =
       existingSubscription?.status === "ACTIVE" &&
       !!existingSubscription.currentPeriodEnd &&
       existingSubscription.currentPeriodEnd > new Date() &&
-      existingSubscription.plan.id !== plan.id &&
-      (existingSubscription.plan.priceMonthlyCents ?? Infinity) > (plan.priceMonthlyCents ?? Infinity);
+      existingSubscription.plan.id !== plan.id;
 
-    if (isDowngrade) {
-      await prisma.subscription.update({
-        where: { organizationId: membership.organizationId },
-        data: { pendingPlanId: plan.id, pendingBillingCycle: dto.billingCycle },
-      });
-      return {
-        scheduled: true as const,
-        effectiveDate: existingSubscription.currentPeriodEnd,
-        planName: plan.name,
-      };
+    if (isPlanSwitch) {
+      return this.createProratedSwitchOrder(membership.organizationId, existingSubscription, plan);
+    }
+
+    const listPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+    if (!listPrice) {
+      throw new BadRequestException("This plan isn't available for self-serve checkout.");
     }
 
     const razorpay = this.requireRazorpay();
@@ -132,7 +125,8 @@ export class BillingService {
     });
 
     return {
-      scheduled: false as const,
+      requiresPayment: true as const,
+      prorated: false,
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
@@ -140,12 +134,81 @@ export class BillingService {
     };
   }
 
-  async cancelPendingChange(userId: string) {
-    const membership = await this.organizations.getPrimaryMembership(userId);
-    await prisma.subscription.update({
-      where: { organizationId: membership.organizationId },
-      data: { pendingPlanId: null, pendingBillingCycle: null },
+  /**
+   * Real day-based proration, no partial refunds (Razorpay doesn't do those
+   * automatically) — a downgrade's unused value becomes account credit instead,
+   * consumed against the next charge. Plan switches immediately either way;
+   * `currentPeriodEnd` and `billingCycle` are preserved, not reset, since the
+   * customer already paid through that date.
+   */
+  private async createProratedSwitchOrder(
+    organizationId: string,
+    existingSubscription: Subscription & { plan: Plan },
+    newPlan: Plan,
+  ) {
+    const cycle = existingSubscription.billingCycle;
+    const totalCycleDays = CYCLE_DAYS[cycle];
+    const daysRemaining = Math.max(
+      0,
+      Math.ceil((existingSubscription.currentPeriodEnd!.getTime() - Date.now()) / DAY_MS),
+    );
+
+    const oldListPrice =
+      cycle === "ANNUAL" ? existingSubscription.plan.priceYearlyCents : existingSubscription.plan.priceMonthlyCents;
+    const newListPrice = cycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
+    if (newListPrice === null) {
+      throw new BadRequestException("This plan isn't available for self-serve checkout.");
+    }
+
+    const unusedOldValue = Math.round(((oldListPrice ?? 0) * daysRemaining) / totalCycleDays);
+    const proratedNewCost = Math.round((newListPrice * daysRemaining) / totalCycleDays);
+    let netCents = proratedNewCost - unusedOldValue;
+
+    if (netCents > 0 && existingSubscription.discountPercent) {
+      netCents = Math.round((netCents * (100 - existingSubscription.discountPercent)) / 100);
+    }
+
+    const creditAvailable = existingSubscription.creditBalanceCents;
+    const amountAfterCredit = netCents - creditAvailable;
+
+    if (amountAfterCredit <= 0) {
+      // Fully covered by proration + existing credit — no payment needed, switch now.
+      const newCreditBalance = creditAvailable - netCents;
+      const updated = await prisma.subscription.update({
+        where: { organizationId },
+        data: { planId: newPlan.id, creditBalanceCents: newCreditBalance },
+        include: { plan: true },
+      });
+      return {
+        requiresPayment: false as const,
+        planName: updated.plan.name,
+        amountCents: netCents,
+        creditBalanceCents: newCreditBalance,
+      };
+    }
+
+    const razorpay = this.requireRazorpay();
+    const order = await razorpay.orders.create({
+      amount: amountAfterCredit,
+      currency: "INR",
+      receipt: randomBytes(10).toString("hex"),
+      notes: {
+        organizationId,
+        planId: newPlan.id,
+        billingCycle: cycle,
+        prorated: "true",
+        preservePeriodEnd: existingSubscription.currentPeriodEnd!.toISOString(),
+      },
     });
+
+    return {
+      requiresPayment: true as const,
+      prorated: true,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: this.keyId,
+    };
   }
 
   async verifyPayment(userId: string, dto: VerifyPaymentDto) {
@@ -179,8 +242,10 @@ export class BillingService {
       notes.organizationId,
       notes.planId,
       (notes.billingCycle as BillingCycle) ?? "MONTHLY",
+      order.amount as number,
       dto.razorpayOrderId,
       dto.razorpayPaymentId,
+      notes.prorated === "true" && notes.preservePeriodEnd ? new Date(notes.preservePeriodEnd) : undefined,
     );
 
     return prisma.subscription.findUnique({
@@ -189,30 +254,32 @@ export class BillingService {
     });
   }
 
+  /**
+   * `preservePeriodEnd` set = a prorated mid-cycle switch: keep the existing
+   * period instead of starting a fresh one, and zero out the credit balance that
+   * was just consumed to help pay for it. Unset = a fresh purchase/renewal:
+   * start a brand-new period from today, same as always.
+   */
   private async activateSubscription(
     organizationId: string,
     planId: string,
     billingCycle: BillingCycle,
+    amountCents: number,
     razorpayOrderId: string,
     razorpayPaymentId: string,
+    preservePeriodEnd?: Date,
   ) {
     const existingPayment = await prisma.payment.findUnique({ where: { razorpayPaymentId } });
     if (existingPayment) return; // webhook + client-side verify can both fire for the same payment
-
-    const plan = await prisma.plan.findUnique({ where: { id: planId } });
-    const amountCents =
-      (billingCycle === "ANNUAL" ? plan?.priceYearlyCents : plan?.priceMonthlyCents) ?? 0;
 
     const data = {
       planId,
       status: "ACTIVE" as const,
       billingCycle,
-      currentPeriodEnd: new Date(Date.now() + PERIOD_MS[billingCycle]),
+      currentPeriodEnd: preservePeriodEnd ?? new Date(Date.now() + PERIOD_MS[billingCycle]),
       razorpayOrderId,
       razorpayPaymentId,
-      // A fresh purchase supersedes any scheduled downgrade queued from before.
-      pendingPlanId: null,
-      pendingBillingCycle: null,
+      ...(preservePeriodEnd && { creditBalanceCents: 0 }),
     };
     await prisma.$transaction([
       prisma.subscription.upsert({
@@ -255,7 +322,7 @@ export class BillingService {
 
     const event = JSON.parse(body) as { event: string; payload?: { payment?: { entity?: unknown } } };
     const payment = event.payload?.payment?.entity as
-      | { id: string; order_id: string }
+      | { id: string; order_id: string; amount: number }
       | undefined;
 
     switch (event.event) {
@@ -272,8 +339,12 @@ export class BillingService {
             notes.organizationId,
             notes.planId,
             (notes.billingCycle as BillingCycle) ?? "MONTHLY",
+            payment.amount,
             payment.order_id,
             payment.id,
+            notes.prorated === "true" && notes.preservePeriodEnd
+              ? new Date(notes.preservePeriodEnd)
+              : undefined,
           );
         }
         break;

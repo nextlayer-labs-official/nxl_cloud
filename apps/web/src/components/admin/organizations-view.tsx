@@ -111,9 +111,9 @@ export function OrganizationsView() {
                         Comped until {formatDate(org.freeUntil)}
                       </div>
                     )}
-                    {org.pendingPlanName && (
-                      <div className="text-ink-450 text-[12px]">
-                        → {org.pendingPlanName} on renewal
+                    {org.creditBalanceCents > 0 && (
+                      <div className="text-success text-[12px] font-medium">
+                        ₹{(org.creditBalanceCents / 100).toFixed(2)} credit
                       </div>
                     )}
                   </td>

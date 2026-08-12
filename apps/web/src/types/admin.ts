@@ -22,7 +22,7 @@ export interface AdminOrganization {
   freeUntil: string | null;
   storageLimitGbOverride: number | null;
   planStorageLimitGb: number | null;
-  pendingPlanName: string | null;
+  creditBalanceCents: number;
   storageUsedBytes: number;
 }
 
@@ -50,6 +50,7 @@ export interface AdminOrganizationDetail {
     discountPercent: number | null;
     freeUntil: string | null;
     storageLimitGbOverride: number | null;
+    creditBalanceCents: number;
     plan: {
       id: string;
       name: string;
@@ -57,7 +58,6 @@ export interface AdminOrganizationDetail {
       priceYearlyCents: number | null;
       storageLimitGb: number | null;
     };
-    pendingPlan: { name: string } | null;
   } | null;
 }
 

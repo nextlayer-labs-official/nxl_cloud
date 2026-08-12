@@ -45,4 +45,10 @@ export class UpdateSubscriptionDto {
   @IsInt()
   @Min(0)
   storageLimitGbOverride?: number | null;
+
+  /** Sets the org's account credit balance directly, in paise. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  creditBalanceCents?: number;
 }

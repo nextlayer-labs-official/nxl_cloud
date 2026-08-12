@@ -160,10 +160,9 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
                 Comped until {formatDate(org.subscription.freeUntil)}
               </div>
             )}
-            {org.subscription.pendingPlan && (
-              <div className="text-ink-450">
-                → switching to {org.subscription.pendingPlan.name} on renewal
-                {org.subscription.currentPeriodEnd && ` (${formatDate(org.subscription.currentPeriodEnd)})`}
+            {org.subscription.creditBalanceCents > 0 && (
+              <div className="text-success font-medium">
+                ₹{(org.subscription.creditBalanceCents / 100).toFixed(2)} account credit
               </div>
             )}
           </div>
@@ -246,6 +245,7 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
             discountPercent: org.subscription?.discountPercent ?? null,
             freeUntil: org.subscription?.freeUntil ?? null,
             storageLimitGbOverride: org.subscription?.storageLimitGbOverride ?? null,
+            creditBalanceCents: org.subscription?.creditBalanceCents ?? 0,
           }}
           onClose={() => setOverriding(false)}
           onSaved={() => {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Req, UseGuards } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { SessionGuard } from "../auth/guards/session.guard";
@@ -37,14 +37,6 @@ export class BillingController {
   @UseGuards(SessionGuard)
   listTransactions(@Req() req: Request) {
     return this.billing.listTransactions(req.user!.id);
-  }
-
-  @Post("cancel-pending-change")
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(SessionGuard)
-  async cancelPendingChange(@Req() req: Request) {
-    await this.billing.cancelPendingChange(req.user!.id);
-    return { success: true };
   }
 
   /** No SessionGuard — Razorpay calls this server-to-server with no session cookie. */

@@ -65,8 +65,8 @@ export interface SubscriptionInfo {
   currentPeriodEnd: string | null;
   discountPercent: number | null;
   freeUntil: string | null;
+  creditBalanceCents: number;
   plan: Plan;
-  pendingPlan: { id: string; name: string } | null;
 }
 
 export interface Transaction {
