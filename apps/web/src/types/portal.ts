@@ -52,7 +52,6 @@ export interface Plan {
   priceMonthlyCents: number | null;
   priceYearlyCents: number | null;
   storageLimitGb: number | null;
-  seatLimit: number | null;
   features: string[];
 }
 

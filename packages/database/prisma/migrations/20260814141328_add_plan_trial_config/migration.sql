@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE `plan` ADD COLUMN `trialDays` INTEGER NOT NULL DEFAULT 14,
+    ADD COLUMN `trialEnabled` BOOLEAN NOT NULL DEFAULT true;

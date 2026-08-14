@@ -463,6 +463,24 @@ a data-model migration.
   the current "Plus" plan (ex-"Business") as default, and confirmed via a
   fresh `createCustomer` call that new orgs now get a real `TRIALING`
   subscription again.
+- ✅ Per-plan trial configuration (2026-08-14) — the trial length was a single
+  hardcoded 14-day constant (`TRIAL_LENGTH_MS`), duplicated in both
+  `AuthService.register` and `AdminService.createCustomer`, applied
+  identically no matter which plan a new org landed on. Replaced with
+  `Plan.trialEnabled` (boolean) and `Plan.trialDays` (int, default 14),
+  editable per plan from the admin Plans page. When a plan's trial is
+  enabled, new subscriptions to it start `TRIALING` for that plan's
+  `trialDays`; when disabled, they start `ACTIVE` immediately with a normal
+  30-day period instead (no trial clock) — same mechanism either way, just a
+  toggle. A "free plan" isn't a separate concept: it's simply a plan priced
+  at ₹0, using these same fields — trial enabled with a day count for "free
+  for N days, then upgrade," or trial disabled for an ongoing free tier.
+  Verified end-to-end against real signups (not mocked): a trial-disabled
+  ₹0 plan produces an immediate `ACTIVE` subscription with a 30-day period;
+  a plan with `trialDays: 7` produces `TRIALING` with `currentPeriodEnd`
+  exactly 7 days out; both the self-serve register path and
+  `AdminService.createCustomer` were confirmed to apply the same plan's
+  settings identically.
 - ⏳ Impersonation-for-support, platform-level metrics/dashboards — not built,
   out of scope for this pass.
 - ⏳ Splitting into fully separate `apps/admin`/`apps/admin-api` processes —

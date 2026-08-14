@@ -78,8 +78,9 @@ export function PlansView() {
               </div>
               <div className="text-ink-450 mt-2 text-[13px]">
                 {plan.storageLimitGb === null ? "Unlimited storage" : `${plan.storageLimitGb} GB storage`}
-                {" · "}
-                {plan.seatLimit === null ? "Unlimited seats" : `${plan.seatLimit} seats`}
+              </div>
+              <div className="text-ink-450 mt-1 text-[13px]">
+                {plan.trialEnabled ? `${plan.trialDays}-day trial` : "No trial — starts active"}
               </div>
               {plan.features.length > 0 && (
                 <ul className="text-ink-600 mt-3 flex flex-col gap-1 text-[13px]">

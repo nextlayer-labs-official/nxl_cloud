@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Min } from "class-validator";
+import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 
 export class UpdatePlanDto {
   @IsOptional()
@@ -21,11 +21,6 @@ export class UpdatePlanDto {
   storageLimitGb?: number | null;
 
   @IsOptional()
-  @IsInt()
-  @Min(1)
-  seatLimit?: number | null;
-
-  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   features?: string[];
@@ -34,4 +29,15 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  /** Whether new subscriptions to this plan start TRIALING (for trialDays) vs. straight to ACTIVE. */
+  @IsOptional()
+  @IsBoolean()
+  trialEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  trialDays?: number;
 }

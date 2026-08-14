@@ -7,10 +7,11 @@ import type { CreatePlanDto } from "./dto/create-plan.dto";
 import type { UpdatePlanDto } from "./dto/update-plan.dto";
 import type { UpdateSubscriptionDto } from "./dto/update-subscription.dto";
 
-// Matches the FAQ's "every plan starts with a 14-day free trial" copy — same
-// as a real self-serve signup (AuthService.register), since an admin-created
-// account should behave identically to one the customer made themselves.
-const TRIAL_LENGTH_MS = 14 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// A plan with trials disabled starts subscriptions ACTIVE for a normal
+// monthly period instead — mirrors AuthService.register exactly, since an
+// admin-created account should behave identically to a real self-serve signup.
+const MONTHLY_PERIOD_MS = 30 * DAY_MS;
 
 @Injectable()
 export class AdminService {
@@ -40,9 +41,11 @@ export class AdminService {
           data: {
             organizationId: organization.id,
             planId: defaultPlan.id,
-            status: "TRIALING",
+            status: defaultPlan.trialEnabled ? "TRIALING" : "ACTIVE",
             billingCycle: "MONTHLY",
-            currentPeriodEnd: new Date(Date.now() + TRIAL_LENGTH_MS),
+            currentPeriodEnd: new Date(
+              Date.now() + (defaultPlan.trialEnabled ? defaultPlan.trialDays * DAY_MS : MONTHLY_PERIOD_MS),
+            ),
           },
         });
       }
@@ -240,9 +243,10 @@ export class AdminService {
           priceMonthlyCents: dto.priceMonthlyCents ?? null,
           priceYearlyCents: dto.priceYearlyCents ?? null,
           storageLimitGb: dto.storageLimitGb ?? null,
-          seatLimit: dto.seatLimit ?? null,
           features: dto.features ?? [],
           isDefault: dto.isDefault ?? false,
+          trialEnabled: dto.trialEnabled ?? true,
+          trialDays: dto.trialDays ?? 14,
         },
       });
     });
@@ -271,9 +275,10 @@ export class AdminService {
           ...(dto.priceMonthlyCents !== undefined && { priceMonthlyCents: dto.priceMonthlyCents }),
           ...(dto.priceYearlyCents !== undefined && { priceYearlyCents: dto.priceYearlyCents }),
           ...(dto.storageLimitGb !== undefined && { storageLimitGb: dto.storageLimitGb }),
-          ...(dto.seatLimit !== undefined && { seatLimit: dto.seatLimit }),
           ...(dto.features !== undefined && { features: dto.features }),
           ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
+          ...(dto.trialEnabled !== undefined && { trialEnabled: dto.trialEnabled }),
+          ...(dto.trialDays !== undefined && { trialDays: dto.trialDays }),
         },
       });
     });

@@ -76,9 +76,10 @@ export interface AdminPlan {
   priceMonthlyCents: number | null;
   priceYearlyCents: number | null;
   storageLimitGb: number | null;
-  seatLimit: number | null;
   features: string[];
   isDefault: boolean;
+  trialEnabled: boolean;
+  trialDays: number;
   createdAt: string;
   updatedAt: string;
 }

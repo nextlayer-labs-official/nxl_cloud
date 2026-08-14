@@ -310,7 +310,6 @@ model Plan {
   priceMonthlyCents Int?
   priceYearlyCents  Int?
   storageLimitGb    Int?
-  seatLimit         Int?
   features          Json
   /// The plan new signups trial by default. Admin-set — deliberately not
   /// matched by `name` (e.g. "Business"), since plan names are renameable
@@ -318,6 +317,15 @@ model Plan {
   /// the moment the plan is renamed. At most one Plan should have this true;
   /// enforced in AdminService, not a DB constraint.
   isDefault         Boolean  @default(false)
+  /// Whether new subscriptions to this plan start as TRIALING (for
+  /// `trialDays`) or go straight to ACTIVE. A plan with this off and price
+  /// fields at 0 is effectively an ongoing free tier; with it on, it's a
+  /// time-boxed preview (regardless of the plan's price) — same mechanism,
+  /// used either way. See AuthService.register / AdminService.createCustomer
+  /// for where this is read.
+  trialEnabled      Boolean  @default(true)
+  /// Trial length in days, only used while `trialEnabled` is true.
+  trialDays         Int      @default(14)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

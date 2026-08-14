@@ -13,8 +13,10 @@ import type { UpdateProfileDto } from "./dto/update-profile.dto";
 import { hashPassword, verifyPassword } from "./password.util";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-// Matches the FAQ page's "Every plan starts with a 14-day free trial" copy.
-const TRIAL_LENGTH_MS = 14 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// A plan with trials disabled starts subscriptions ACTIVE for a normal
+// monthly period instead — matches billing.service.ts's MONTHLY period.
+const MONTHLY_PERIOD_MS = 30 * DAY_MS;
 
 function getUserAgent(req: Request): string | undefined {
   const ua = req.headers["user-agent"];
@@ -69,9 +71,11 @@ export class AuthService {
           data: {
             organizationId: organization.id,
             planId: defaultPlan.id,
-            status: "TRIALING",
+            status: defaultPlan.trialEnabled ? "TRIALING" : "ACTIVE",
             billingCycle: "MONTHLY",
-            currentPeriodEnd: new Date(Date.now() + TRIAL_LENGTH_MS),
+            currentPeriodEnd: new Date(
+              Date.now() + (defaultPlan.trialEnabled ? defaultPlan.trialDays * DAY_MS : MONTHLY_PERIOD_MS),
+            ),
           },
         });
       }
