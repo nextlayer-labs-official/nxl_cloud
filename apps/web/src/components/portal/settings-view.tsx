@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, Info, Loader2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Plan, SubscriptionInfo, SubscriptionStatus, Transaction } from "@/types/portal";
+import { CheckoutConfirmationModal } from "./checkout-confirmation-modal";
 import { usePortal } from "./portal-context";
 
 const STATUS_LABEL: Record<SubscriptionStatus, string> = {
@@ -18,6 +20,11 @@ const STATUS_LABEL: Record<SubscriptionStatus, string> = {
 
 type BillingCycle = "MONTHLY" | "ANNUAL";
 
+interface Usage {
+  usedBytes: number;
+  limitBytes: number | null;
+}
+
 function priceForCycle(plan: Plan, cycle: BillingCycle): number | null {
   return cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
 }
@@ -25,6 +32,10 @@ function priceForCycle(plan: Plan, cycle: BillingCycle): number | null {
 function formatPrice(cents: number | null, cycle: BillingCycle): string {
   if (cents === null) return "Custom";
   return `₹${(cents / 100).toFixed(2)}/${cycle === "ANNUAL" ? "yr" : "mo"}`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 interface RazorpayCheckoutResponse {
@@ -88,12 +99,16 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-border-subtle bg-background rounded-2xl border p-6">
-      <h2 className="text-foreground text-[16px] font-semibold">{title}</h2>
-      <p className="text-ink-450 mt-1 mb-5 text-sm">{description}</p>
+    <div>
+      <h2 className="text-foreground text-[20px] font-semibold">{title}</h2>
+      <p className="text-ink-450 mt-1 mb-6 text-sm">{description}</p>
       {children}
     </div>
   );
+}
+
+function SubsectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-ink-450 mb-3 text-xs font-semibold tracking-wide uppercase">{children}</h3>;
 }
 
 function Field({
@@ -128,6 +143,302 @@ function Field({
   );
 }
 
+function SettingsRow({
+  label,
+  value,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  label: string;
+  value?: string;
+  description?: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-4">
+      <div className="min-w-0">
+        <div className="text-foreground text-[14px] font-medium">{label}</div>
+        {description && <div className="text-ink-450 mt-0.5 text-[13px]">{description}</div>}
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        {value && <span className="text-ink-450 text-[14px]">{value}</span>}
+        <button
+          type="button"
+          onClick={onAction}
+          className="text-foreground hover:text-primary cursor-pointer text-[13px] font-semibold underline underline-offset-2"
+        >
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditFieldModal({
+  label,
+  value,
+  type = "text",
+  onClose,
+  onSave,
+}: {
+  label: string;
+  value: string;
+  type?: string;
+  onClose: () => void;
+  onSave: (value: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      setError(`${label} can't be empty.`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(trimmed);
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Couldn't update ${label.toLowerCase()}.`);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="border-border-subtle bg-background w-full max-w-sm rounded-2xl border p-6 shadow-2xl"
+      >
+        <h2 className="text-foreground mb-4 text-[17px] font-semibold">Edit {label.toLowerCase()}</h2>
+        <input
+          autoFocus
+          type={type}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="border-input bg-background w-full rounded-lg border px-3.5 py-2.5 text-sm outline-none"
+        />
+        {error && <p className="text-error-text mt-2.5 text-[13px]">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-foreground hover:bg-surface-muted cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ChangePasswordModal({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void;
+  onSave: (currentPassword: string, newPassword: string) => Promise<void>;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (newPassword !== confirmPassword) {
+      setError("New passwords don't match.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(currentPassword, newPassword);
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't update your password.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="border-border-subtle bg-background w-full max-w-sm rounded-2xl border p-6 shadow-2xl"
+      >
+        <h2 className="text-foreground mb-4 text-[17px] font-semibold">Change password</h2>
+        <div className="flex flex-col gap-4">
+          <Field
+            id="cp-current"
+            label="Current password"
+            type="password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            autoComplete="current-password"
+          />
+          <Field
+            id="cp-new"
+            label="New password"
+            type="password"
+            value={newPassword}
+            onChange={setNewPassword}
+            autoComplete="new-password"
+          />
+          <Field
+            id="cp-confirm"
+            label="Confirm new password"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+          />
+        </div>
+        {error && <p className="text-error-text mt-3 text-[13px]">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-foreground hover:bg-surface-muted cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function DeleteAccountModal({
+  onClose,
+  onConfirm,
+}: {
+  onClose: () => void;
+  onConfirm: (password: string) => Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (confirmText !== "DELETE") {
+      setError('Type "DELETE" to confirm.');
+      return;
+    }
+    setDeleting(true);
+    try {
+      await onConfirm(password);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't delete your account.");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="border-border-subtle bg-background w-full max-w-sm rounded-2xl border p-6 shadow-2xl"
+      >
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="text-error-text mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <h2 className="text-foreground text-[17px] font-semibold">Delete account</h2>
+            <p className="text-ink-450 mt-1 text-[13px]">
+              This permanently deletes your account and every file and folder in your workspace. This cannot
+              be undone.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-col gap-4">
+          <Field
+            id="da-password"
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="current-password"
+          />
+          <Field id="da-confirm" label='Type "DELETE" to confirm' value={confirmText} onChange={setConfirmText} />
+        </div>
+        {error && <p className="text-error-text mt-3 text-[13px]">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-foreground hover:bg-surface-muted cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={deleting}
+            className="bg-error-text flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+            Delete my account
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const { user, refresh } = usePortal();
   const router = useRouter();
@@ -138,25 +449,17 @@ export function SettingsView() {
     requestedTab && TABS.some((t) => t.key === requestedTab) ? (requestedTab as SettingsTab) : "profile";
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
-  const [name, setName] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
-  const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [editingField, setEditingField] = useState<"name" | "email" | null>(null);
 
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  const [deletePassword, setDeletePassword] = useState("");
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const [billingLoading, setBillingLoading] = useState(true);
   const [billingActionError, setBillingActionError] = useState<string | null>(null);
   const [billingActionLoading, setBillingActionLoading] = useState<string | null>(null);
@@ -164,17 +467,20 @@ export function SettingsView() {
     null,
   );
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("MONTHLY");
+  const [confirmingPlan, setConfirmingPlan] = useState<Plan | null>(null);
 
   useEffect(() => {
     Promise.all([
       api.get<Plan[]>("/billing/plans"),
       api.get<SubscriptionInfo | null>("/billing/subscription"),
       api.get<Transaction[]>("/billing/transactions"),
+      api.get<Usage>("/organizations/usage"),
     ])
-      .then(([plansData, subscriptionData, transactionsData]) => {
+      .then(([plansData, subscriptionData, transactionsData, usageData]) => {
         setPlans(plansData);
         setSubscription(subscriptionData);
         setTransactions(transactionsData);
+        setUsage(usageData);
       })
       .finally(() => setBillingLoading(false));
   }, []);
@@ -189,23 +495,28 @@ export function SettingsView() {
         | { requiresPayment: false; planName: string; amountCents: number; creditBalanceCents: number }
       >("/billing/order", { planId, billingCycle });
 
-      // A mid-cycle switch fully covered by proration + existing credit needs no
-      // payment at all — the plan already switched server-side.
+      // An upgrade fully covered by proration + existing credit needs no
+      // payment at all — the plan already switched server-side. (Downgrades
+      // never reach this branch — they're blocked outright while a period
+      // is still active, see the plan cards' disabled state below.)
       if (!order.requiresPayment) {
-        const [updatedSubscription, updatedTransactions] = await Promise.all([
+        const [updatedSubscription, updatedTransactions, updatedUsage] = await Promise.all([
           api.get<SubscriptionInfo | null>("/billing/subscription"),
           api.get<Transaction[]>("/billing/transactions"),
+          api.get<Usage>("/organizations/usage"),
         ]);
         setSubscription(updatedSubscription);
         setTransactions(updatedTransactions);
+        setUsage(updatedUsage);
         setCheckoutMessage({
           type: "success",
           text:
-            order.amountCents < 0
-              ? `Switched to ${order.planName} — ₹${(Math.abs(order.amountCents) / 100).toFixed(2)} credited to your account for future charges.`
+            order.amountCents > 0
+              ? `Switched to ${order.planName} — ₹${(order.amountCents / 100).toFixed(2)} covered by your account credit.`
               : `Switched to ${order.planName} at no additional charge.`,
         });
         setBillingActionLoading(null);
+        setConfirmingPlan(null);
         return;
       }
 
@@ -214,6 +525,7 @@ export function SettingsView() {
         throw new Error("Couldn't load the payment form. Check your connection and try again.");
       }
 
+      setConfirmingPlan(null);
       let completed = false;
       const checkout = new window.Razorpay({
         key: order.keyId,
@@ -231,12 +543,14 @@ export function SettingsView() {
               razorpayPaymentId: response.razorpay_payment_id,
               razorpaySignature: response.razorpay_signature,
             });
-            const [updatedSubscription, updatedTransactions] = await Promise.all([
+            const [updatedSubscription, updatedTransactions, updatedUsage] = await Promise.all([
               api.get<SubscriptionInfo | null>("/billing/subscription"),
               api.get<Transaction[]>("/billing/transactions"),
+              api.get<Usage>("/organizations/usage"),
             ]);
             setSubscription(updatedSubscription);
             setTransactions(updatedTransactions);
+            setUsage(updatedUsage);
             setCheckoutMessage({
               type: "success",
               text: order.prorated
@@ -264,90 +578,41 @@ export function SettingsView() {
         err instanceof ApiError ? err.message : (err as Error).message || "Couldn't start checkout.",
       );
       setBillingActionLoading(null);
+      setConfirmingPlan(null);
     }
   }
 
-  async function handleSaveProfile(e: React.FormEvent) {
-    e.preventDefault();
-    setProfileMessage(null);
-    setProfileSaving(true);
-    try {
-      await api.patch("/auth/me", { name, email });
-      await refresh();
-      setProfileMessage({ type: "success", text: "Profile updated." });
-    } catch (err) {
-      setProfileMessage({
-        type: "error",
-        text: err instanceof ApiError ? err.message : "Couldn't update your profile.",
-      });
-    } finally {
-      setProfileSaving(false);
-    }
+  async function handleSaveProfileField(field: "name" | "email", value: string) {
+    await api.patch("/auth/me", { [field]: value });
+    await refresh();
+    setProfileMessage({ type: "success", text: field === "name" ? "Name updated." : "Email updated." });
   }
 
-  async function handleChangePassword(e: React.FormEvent) {
-    e.preventDefault();
-    setPasswordMessage(null);
-    if (newPassword !== confirmPassword) {
-      setPasswordMessage({ type: "error", text: "New passwords don't match." });
-      return;
-    }
-    setPasswordSaving(true);
-    try {
-      await api.post("/auth/change-password", { currentPassword, newPassword });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setPasswordMessage({ type: "success", text: "Password updated." });
-    } catch (err) {
-      setPasswordMessage({
-        type: "error",
-        text: err instanceof ApiError ? err.message : "Couldn't update your password.",
-      });
-    } finally {
-      setPasswordSaving(false);
-    }
+  async function handleChangePassword(currentPassword: string, newPassword: string) {
+    await api.post("/auth/change-password", { currentPassword, newPassword });
+    setPasswordMessage({ type: "success", text: "Password updated." });
   }
 
-  async function handleDeleteAccount(e: React.FormEvent) {
-    e.preventDefault();
-    setDeleteError(null);
-    if (deleteConfirmText !== "DELETE") {
-      setDeleteError('Type "DELETE" to confirm.');
-      return;
-    }
-    if (
-      !window.confirm(
-        "This permanently deletes your account and every file and folder in your workspace. This cannot be undone. Continue?",
-      )
-    ) {
-      return;
-    }
-    setDeleting(true);
-    try {
-      await api.delete("/auth/me", { password: deletePassword });
-      router.replace("/login");
-    } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : "Couldn't delete your account.");
-      setDeleting(false);
-    }
+  async function handleDeleteAccount(password: string) {
+    await api.delete("/auth/me", { password });
+    router.replace("/login");
   }
+
+  const percentUsed = usage?.limitBytes ? Math.min(100, (usage.usedBytes / usage.limitBytes) * 100) : null;
 
   return (
-    <div className="max-w-2xl">
+    <div>
       <h1 className="text-foreground mb-6 text-[26px] font-bold tracking-[-0.01em]">Settings</h1>
 
-      <div className="border-border-subtle mb-8 flex gap-1 border-b">
+      <div className="bg-surface-muted mb-8 inline-flex items-center gap-1 rounded-full p-1">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
             className={cn(
-              "cursor-pointer border-b-2 px-3 py-2.5 text-sm font-semibold",
-              activeTab === tab.key
-                ? "border-primary text-foreground"
-                : "text-ink-450 hover:text-foreground border-transparent",
+              "cursor-pointer rounded-full px-4 py-2 text-sm font-semibold transition",
+              activeTab === tab.key ? "bg-background text-foreground shadow-sm" : "text-ink-550 hover:text-foreground",
             )}
           >
             {tab.label}
@@ -356,44 +621,37 @@ export function SettingsView() {
       </div>
 
       {activeTab === "profile" && (
-      <form onSubmit={handleSaveProfile}>
-        <SectionCard title="Profile" description="Your name and email address.">
-          <div className="flex flex-col gap-4">
-            <Field id="s-name" label="Name" value={name} onChange={setName} autoComplete="name" />
-            <Field
-              id="s-email"
-              label="Email"
-              type="email"
-              value={email}
-              onChange={setEmail}
-              autoComplete="email"
+        <SectionCard title="Personal account" description="Your name and email address.">
+          {profileMessage && (
+            <p
+              className={cn(
+                "mb-4 text-[13px]",
+                profileMessage.type === "success" ? "text-success" : "text-error-text",
+              )}
+            >
+              {profileMessage.text}
+            </p>
+          )}
+          <SubsectionLabel>Basics</SubsectionLabel>
+          <div className="border-border-subtle divide-border-subtle divide-y rounded-xl border">
+            <SettingsRow
+              label="Name"
+              value={user.name}
+              actionLabel="Edit"
+              onAction={() => setEditingField("name")}
             />
-            {profileMessage && (
-              <p
-                className={
-                  profileMessage.type === "success" ? "text-success text-[13px]" : "text-error-text text-[13px]"
-                }
-              >
-                {profileMessage.text}
-              </p>
-            )}
-            <div>
-              <button
-                type="submit"
-                disabled={profileSaving}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
-              >
-                {profileSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                Save changes
-              </button>
-            </div>
+            <SettingsRow
+              label="Email"
+              value={user.email}
+              actionLabel="Edit"
+              onAction={() => setEditingField("email")}
+            />
           </div>
         </SectionCard>
-      </form>
       )}
 
       {activeTab === "billing" && (
-      <SectionCard title="Plan & billing" description="Manage your subscription.">
+      <SectionCard title="Plan & billing" description="Manage your subscription and storage.">
         {checkoutMessage && (
           <p
             className={cn(
@@ -405,38 +663,61 @@ export function SettingsView() {
           </p>
         )}
         {billingLoading ? (
-          <div className="bg-surface-muted h-24 animate-pulse rounded-xl" />
+          <div className="bg-surface-muted h-32 animate-pulse rounded-xl" />
         ) : (
           <>
-            <div className="border-border-subtle bg-surface-muted-2 mb-5 flex items-center justify-between rounded-xl border p-4">
-              <div>
-                <div className="text-foreground text-[14px] font-semibold">
-                  {subscription?.plan.name ?? "No plan"}
+            <div className="border-border-subtle bg-surface-muted-2 mb-8 rounded-xl border p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-foreground text-[16px] font-semibold">
+                    {subscription?.plan.name ?? "No plan"}
+                  </div>
+                  <div className="text-ink-450 mt-0.5 text-[13px]">
+                    {subscription ? STATUS_LABEL[subscription.status] : "—"}
+                    {subscription?.currentPeriodEnd &&
+                      ` · ${subscription.status === "TRIALING" ? "trial ends" : "renews"} ${formatDate(subscription.currentPeriodEnd)}`}
+                  </div>
                 </div>
-                <div className="text-ink-450 text-[13px]">
-                  {subscription ? STATUS_LABEL[subscription.status] : "—"}
-                  {subscription?.currentPeriodEnd &&
-                    ` · ${subscription.status === "TRIALING" ? "trial ends" : "renews"} ${new Date(subscription.currentPeriodEnd).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`}
+              </div>
+
+              {usage && (
+                <div className="mt-4">
+                  <div className="bg-surface-muted h-2.5 w-full overflow-hidden rounded-full">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        percentUsed !== null && percentUsed >= 90
+                          ? "bg-error-text"
+                          : percentUsed !== null && percentUsed >= 70
+                            ? "bg-warn"
+                            : "bg-primary",
+                      )}
+                      style={{ width: `${percentUsed ?? 0}%` }}
+                    />
+                  </div>
+                  <div className="text-ink-450 mt-1.5 text-[12px]">
+                    {usage.limitBytes === null
+                      ? `${formatBytes(usage.usedBytes)} used · unlimited storage`
+                      : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.limitBytes)} used`}
+                  </div>
                 </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
                 {subscription?.freeUntil && new Date(subscription.freeUntil) > new Date() && (
-                  <div className="text-success mt-1 text-[13px] font-medium">
-                    Comped until{" "}
-                    {new Date(subscription.freeUntil).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
+                  <div className="text-success text-[13px] font-medium">
+                    Comped until {formatDate(subscription.freeUntil)}
                   </div>
                 )}
                 {!!subscription?.discountPercent && (
-                  <div className="text-success mt-1 text-[13px] font-medium">
+                  <div className="text-success text-[13px] font-medium">
                     {subscription.discountPercent}% off will apply at your next renewal
                   </div>
                 )}
                 {!!subscription?.creditBalanceCents && (
-                  <div className="text-success mt-1 text-[13px] font-medium">
-                    Account credit: ₹{(subscription.creditBalanceCents / 100).toFixed(2)} (applied to your
-                    next charge)
+                  <div className="text-success text-[13px] font-medium">
+                    Account credit: ₹{(subscription.creditBalanceCents / 100).toFixed(2)} (applied to your next
+                    charge)
                   </div>
                 )}
               </div>
@@ -446,25 +727,28 @@ export function SettingsView() {
               <p className="text-error-text mb-4 text-[13px]">{billingActionError}</p>
             )}
 
-            <div className="bg-surface-muted mb-4 inline-flex items-center gap-1 rounded-full p-1">
-              {(["MONTHLY", "ANNUAL"] as const).map((cycle) => (
-                <button
-                  key={cycle}
-                  type="button"
-                  onClick={() => setBillingCycle(cycle)}
-                  className={cn(
-                    "cursor-pointer rounded-full px-4 py-1.5 text-[13px] font-semibold",
-                    billingCycle === cycle
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-ink-550 bg-transparent",
-                  )}
-                >
-                  {cycle === "MONTHLY" ? "Monthly" : "Annual"}
-                </button>
-              ))}
+            <div className="mb-4 flex items-center justify-between">
+              <SubsectionLabel>Available plans</SubsectionLabel>
+              <div className="bg-surface-muted inline-flex items-center gap-1 rounded-full p-1">
+                {(["MONTHLY", "ANNUAL"] as const).map((cycle) => (
+                  <button
+                    key={cycle}
+                    type="button"
+                    onClick={() => setBillingCycle(cycle)}
+                    className={cn(
+                      "cursor-pointer rounded-full px-4 py-1.5 text-[13px] font-semibold",
+                      billingCycle === cycle
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-ink-550 bg-transparent",
+                    )}
+                  >
+                    {cycle === "MONTHLY" ? "Monthly" : "Annual"}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {plans.map((plan) => {
                 const isCurrent =
                   subscription?.plan.id === plan.id && subscription.status === "ACTIVE";
@@ -487,59 +771,118 @@ export function SettingsView() {
                 // (non-actionable, already-paid-for) current one.
                 const discount = subscription?.discountPercent ?? null;
                 const price = priceForCycle(plan, billingCycle);
+                const discountedPrice =
+                  discount && price !== null ? Math.round((price * (100 - discount)) / 100) : null;
+
                 return (
                   <div
                     key={plan.id}
-                    className="border-border-subtle flex items-center justify-between rounded-xl border p-4"
-                  >
-                    <div>
-                      <div className="text-foreground text-[14px] font-semibold">{plan.name}</div>
-                      <div className="text-ink-450 text-[13px]">
-                        {discount && price !== null ? (
-                          <>
-                            <span className="line-through">{formatPrice(price, billingCycle)}</span>{" "}
-                            <span className="text-success font-medium">
-                              {formatPrice(Math.round((price * (100 - discount)) / 100), billingCycle)}
-                            </span>
-                          </>
-                        ) : (
-                          formatPrice(price, billingCycle)
-                        )}
-                        {hasSwitchablePlan && " · prorated"}
-                      </div>
-                    </div>
-                    {price === null ? (
-                      <Link
-                        href="/contact"
-                        className="border-input text-foreground hover:bg-surface-muted rounded-lg border px-3.5 py-2 text-sm font-semibold"
-                      >
-                        Contact us
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSubscribe(plan.id)}
-                        disabled={billingActionLoading === plan.id}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold disabled:opacity-60",
-                          isCurrent
-                            ? "border-input text-foreground hover:bg-surface-muted border"
-                            : "bg-primary text-primary-foreground hover:bg-primary/90",
-                        )}
-                      >
-                        {billingActionLoading === plan.id && (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                        {isCurrent ? "Renew" : isUpgrade ? "Upgrade" : isDowngrade ? "Downgrade" : "Subscribe"}
-                      </button>
+                    className={cn(
+                      "border-border-subtle bg-background flex flex-col rounded-2xl border p-5",
+                      isCurrent && "border-primary ring-primary/15 ring-2",
                     )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-foreground text-[16px] font-semibold">{plan.name}</span>
+                      {isCurrent && (
+                        <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-[11px] font-semibold">
+                          Current plan
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-2 flex items-baseline gap-1.5">
+                      {price === null ? (
+                        <span className="text-foreground text-[24px] font-bold">Custom</span>
+                      ) : (
+                        <>
+                          <span className="text-foreground text-[28px] font-bold tracking-[-0.01em]">
+                            ₹{((discountedPrice ?? price) / 100).toFixed(2)}
+                          </span>
+                          <span className="text-ink-450 text-[13px]">
+                            /{billingCycle === "ANNUAL" ? "yr" : "mo"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {discountedPrice !== null && price !== null && (
+                      <div className="text-ink-450 text-[12px] line-through">
+                        {formatPrice(price, billingCycle)}
+                      </div>
+                    )}
+
+                    <div className="text-ink-450 mt-2 text-[13px]">
+                      {plan.storageLimitGb === null ? "Unlimited storage" : `${plan.storageLimitGb} GB storage`}
+                    </div>
+                    {isUpgrade && (
+                      <div className="text-ink-450 mt-0.5 text-[12px]">Prorated — pay only the difference</div>
+                    )}
+
+                    {plan.features.length > 0 && (
+                      <ul className="mt-4 flex flex-col gap-2">
+                        {plan.features.map((feature, i) => (
+                          <li key={i} className="text-ink-600 flex items-start gap-2 text-[13px]">
+                            <Check className="text-success mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <div className="flex-1" />
+
+                    {isDowngrade && subscription?.currentPeriodEnd && (
+                      <div className="bg-surface-muted mt-4 flex items-start gap-2 rounded-lg px-3 py-2.5">
+                        <Info className="text-ink-450 mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span className="text-ink-600 text-[12px]">
+                          Downgrades take effect at renewal, not immediately — you can switch to {plan.name}{" "}
+                          once your current plan ends on {formatDate(subscription.currentPeriodEnd)}.
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="mt-4">
+                      {price === null ? (
+                        <Link
+                          href="/contact"
+                          className="border-input text-foreground hover:bg-surface-muted block w-full rounded-lg border px-3.5 py-2 text-center text-sm font-semibold"
+                        >
+                          Contact us
+                        </Link>
+                      ) : isDowngrade ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="border-input text-ink-450 w-full cursor-not-allowed rounded-lg border px-3.5 py-2 text-sm font-semibold opacity-60"
+                        >
+                          Downgrade
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingPlan(plan)}
+                          disabled={billingActionLoading === plan.id}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold disabled:opacity-60",
+                            isCurrent
+                              ? "border-input text-foreground hover:bg-surface-muted border"
+                              : "bg-primary text-primary-foreground hover:bg-primary/90",
+                          )}
+                        >
+                          {billingActionLoading === plan.id && (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          )}
+                          {isCurrent ? "Renew" : isUpgrade ? "Upgrade" : "Subscribe"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            <div className="mt-8">
-              <h3 className="text-foreground mb-3 text-[14px] font-semibold">Transaction history</h3>
+            <div className="mt-10">
+              <SubsectionLabel>Billing history</SubsectionLabel>
               {transactions.length === 0 ? (
                 <p className="text-ink-450 text-[13px]">No transactions yet.</p>
               ) : (
@@ -549,11 +892,7 @@ export function SettingsView() {
                       <div>
                         <div className="text-foreground font-medium">{tx.plan.name}</div>
                         <div className="text-ink-450">
-                          {new Date(tx.createdAt).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
+                          {formatDate(tx.createdAt)}
                           {" · "}
                           {tx.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
                         </div>
@@ -572,99 +911,89 @@ export function SettingsView() {
       )}
 
       {activeTab === "security" && (
-      <form onSubmit={handleChangePassword}>
-        <SectionCard title="Password" description="Update the password used to sign in.">
-          <div className="flex flex-col gap-4">
-            <Field
-              id="s-current-password"
-              label="Current password"
-              type="password"
-              value={currentPassword}
-              onChange={setCurrentPassword}
-              autoComplete="current-password"
+        <SectionCard title="Security" description="Manage the password used to sign in.">
+          {passwordMessage && (
+            <p
+              className={cn(
+                "mb-4 text-[13px]",
+                passwordMessage.type === "success" ? "text-success" : "text-error-text",
+              )}
+            >
+              {passwordMessage.text}
+            </p>
+          )}
+          <SubsectionLabel>Password</SubsectionLabel>
+          <div className="border-border-subtle divide-border-subtle divide-y rounded-xl border">
+            <SettingsRow
+              label="Password"
+              value="••••••••"
+              actionLabel="Change password"
+              onAction={() => setChangingPassword(true)}
             />
-            <Field
-              id="s-new-password"
-              label="New password"
-              type="password"
-              value={newPassword}
-              onChange={setNewPassword}
-              autoComplete="new-password"
-            />
-            <Field
-              id="s-confirm-password"
-              label="Confirm new password"
-              type="password"
-              value={confirmPassword}
-              onChange={setConfirmPassword}
-              autoComplete="new-password"
-            />
-            {passwordMessage && (
-              <p
-                className={
-                  passwordMessage.type === "success" ? "text-success text-[13px]" : "text-error-text text-[13px]"
-                }
-              >
-                {passwordMessage.text}
-              </p>
-            )}
-            <div>
+          </div>
+        </SectionCard>
+      )}
+
+      {activeTab === "danger" && (
+        <SectionCard title="Danger zone" description="Irreversible account actions.">
+          <div className="border-error-border bg-error-bg overflow-hidden rounded-xl border">
+            <div className="flex items-center justify-between gap-4 px-4 py-4">
+              <div className="min-w-0">
+                <div className="text-error-text text-[14px] font-medium">Delete account</div>
+                <div className="text-error-text/80 mt-0.5 text-[13px]">
+                  Permanently deletes your account and every file and folder in your workspace.
+                </div>
+              </div>
               <button
-                type="submit"
-                disabled={passwordSaving}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
+                type="button"
+                onClick={() => setDeletingAccount(true)}
+                className="border-error-border text-error-text hover:bg-error-border/10 shrink-0 cursor-pointer rounded-lg border px-3.5 py-2 text-sm font-semibold"
               >
-                {passwordSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                Update password
+                Delete account
               </button>
             </div>
           </div>
         </SectionCard>
-      </form>
       )}
 
-      {activeTab === "danger" && (
-      <form onSubmit={handleDeleteAccount}>
-        <div className="border-error-border bg-error-bg rounded-2xl border p-6">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="text-error-text mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <h2 className="text-error-text text-[16px] font-semibold">Delete account</h2>
-              <p className="text-error-text/80 mt-1 mb-5 text-sm">
-                Permanently deletes your account and every file and folder in your workspace.
-                This cannot be undone.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-4">
-            <Field
-              id="s-delete-password"
-              label="Password"
-              type="password"
-              value={deletePassword}
-              onChange={setDeletePassword}
-              autoComplete="current-password"
-            />
-            <Field
-              id="s-delete-confirm"
-              label='Type "DELETE" to confirm'
-              value={deleteConfirmText}
-              onChange={setDeleteConfirmText}
-            />
-            {deleteError && <p className="text-error-text text-[13px]">{deleteError}</p>}
-            <div>
-              <button
-                type="submit"
-                disabled={deleting}
-                className="bg-error-text flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
-                Delete my account
-              </button>
-            </div>
-          </div>
-        </div>
-      </form>
+      {confirmingPlan && (
+        <CheckoutConfirmationModal
+          plan={confirmingPlan}
+          billingCycle={billingCycle}
+          confirming={billingActionLoading === confirmingPlan.id}
+          onClose={() => setConfirmingPlan(null)}
+          onConfirm={() => handleSubscribe(confirmingPlan.id)}
+        />
+      )}
+
+      {editingField === "name" && (
+        <EditFieldModal
+          label="Name"
+          value={user.name}
+          onClose={() => setEditingField(null)}
+          onSave={(value) => handleSaveProfileField("name", value)}
+        />
+      )}
+
+      {editingField === "email" && (
+        <EditFieldModal
+          label="Email"
+          value={user.email}
+          type="email"
+          onClose={() => setEditingField(null)}
+          onSave={(value) => handleSaveProfileField("email", value)}
+        />
+      )}
+
+      {changingPassword && (
+        <ChangePasswordModal
+          onClose={() => setChangingPassword(false)}
+          onSave={handleChangePassword}
+        />
+      )}
+
+      {deletingAccount && (
+        <DeleteAccountModal onClose={() => setDeletingAccount(false)} onConfirm={handleDeleteAccount} />
       )}
     </div>
   );

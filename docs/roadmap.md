@@ -307,6 +307,88 @@ UPI/cards there.
     hosted Checkout UI through a browser, since no browser-automation tool
     was available in that session — the webhook path itself remains
     unverified (see below), same as before this change.
+- ✅ Downgrades blocked until renewal, plus a storage-fit gate (2026-08-14) —
+  supersedes the symmetric proration model directly above (2026-08-12),
+  which treated upgrades and downgrades identically (same net-cost formula,
+  immediate either way). After weighing an immediate-with-credit version
+  (briefly built and tested, never committed) against the risk of customers
+  feeling shortchanged by any proration/credit math they didn't fully
+  follow, settled on the simplest, least disputable rule:
+  - **Upgrade** (`createUpgradeOrder`, unchanged from 2026-08-12) — real
+    day-based proration (`unusedOldValue`, `proratedNewCost`, net), consumes
+    any existing credit balance toward the charge, and `currentPeriodEnd`
+    **always resets** to a fresh period from the switch date
+    (`PERIOD_MS[cycle]`, so monthly gets a real month, annual a real year)
+    — the customer is paying for a new period, not topping up the old one.
+  - **Downgrade** — refused outright with a 400 while the current period is
+    still active (`createOrder` checks `hasActivePeriod`; the error message
+    states the exact date it'll become available:
+    `"You can switch to {plan} once your current plan ends on {date}..."`).
+    Once the period has actually lapsed, picking a cheaper plan is no longer
+    a special case at all — it just falls through to the normal
+    full-price-purchase path every other plan pick already uses, no
+    proration or credit math involved. No `pendingPlanId`/scheduled-apply
+    machinery either (that was deleted on 2026-08-12 and deliberately not
+    resurrected) — "blocked until expiry, then a normal purchase" needs zero
+    new state, just a date comparison already being made anyway.
+  - **Storage-fit gate, applies to any plan change regardless of direction**:
+    `OrganizationsService` gained a public `effectiveLimitBytes()`
+    (previously private) and a new `getUsedBytes()`. `BillingService`'s
+    `assertStorageFitsPlan` checks the org's real current usage against the
+    *target* plan's effective limit (its own `storageLimitGbOverride` if
+    admin-set, else the plan's default) before allowing any plan change, and
+    throws a 400 with a clear message if it doesn't fit — previously nothing
+    stopped a switch into a plan smaller than what was already stored.
+  - Frontend: a downgrade-eligible plan row shows a disabled "Downgrade"
+    button with an "Available {date}" caption instead of a clickable button
+    that would just error — no dead click.
+  - Verified end-to-end against the real Razorpay test API, same
+    no-mocking approach as always: a downgrade attempt while the period is
+    active returns exactly the expected 400 with the correct date, and
+    leaves the subscription untouched; backdating `currentPeriodEnd` via the
+    admin override and retrying the identical request succeeds as a normal
+    full-price order; and — with a real file uploaded and a 0 GB storage
+    override forced — the same post-expiry downgrade attempt is still
+    correctly rejected by the storage-fit gate.
+- ✅ Checkout confirmation screen (2026-08-14) — upgrade/downgrade/renew
+  previously acted the instant a button was clicked (created a real Razorpay
+  order, or wrote a free switch straight to the DB) with no chance to review
+  the numbers first. Added a "review before you commit" step across all
+  three flows:
+  - `billing.service.ts` gained two pure, side-effect-free helpers —
+    `computeListAmount` and `computeUpgradeProration` (the latter now also
+    returns `daysRemaining`) — extracted from `createOrder`/
+    `createUpgradeOrder`'s existing inlined formulas via a plain
+    extract-method refactor (same control flow, same order of operations,
+    just the arithmetic named and shared). `checkStorageFit` was similarly
+    split out of `assertStorageFitsPlan` as a non-throwing variant.
+  - New `getOrderPreview()` (routed at `GET /billing/quote?planId=&billingCycle=`)
+    mirrors `createOrder`'s exact branching using those same shared helpers,
+    but only ever reads — no Razorpay order, no Prisma write. Returns a
+    `SwitchPreview` covering every case: plan names, list price, proration
+    breakdown (upgrade only), discount, credit applied, days remaining,
+    total due now, the new renewal date, and — for a blocked mid-cycle
+    downgrade or a storage-fit failure — `blocked: true` with the exact same
+    message `createOrder` would've thrown.
+  - New `checkout-confirmation-modal.tsx` fetches this quote and shows the
+    full breakdown (current plan → new plan, itemized pricing, total due,
+    new renewal date) before any button that commits money or a switch;
+    `settings-view.tsx`'s Upgrade/Renew/Subscribe buttons now open this
+    modal instead of calling `handleSubscribe` directly, and the modal's
+    confirm action is what actually triggers it. The already-disabled
+    downgrade-blocked button is unchanged — nothing to confirm for a click
+    that isn't possible.
+  - Verified end-to-end against the real Razorpay test API: re-ran the full
+    upgrade/downgrade/storage-gate suite from immediately above, calling
+    `GET /billing/quote` right before each `POST /billing/order` and
+    confirming the two matched exactly in every case — same charge amount
+    for a first purchase, an upgrade, and an allowed post-expiry downgrade;
+    same `blocked`/reason text for a mid-cycle downgrade attempt and for a
+    storage-fit failure (using a real uploaded file and a forced 0 GB
+    override) — confirming the shared-helper refactor didn't change any
+    commit-path behavior. The modal UI itself (skeleton loading, breakdown
+    rendering, button states) has not been visually verified — no browser
+    tool available this session.
 - ✅ Self-serve renewal (2026-08-09) — there was no automated renewal to begin
   with (no cron, no Razorpay Subscriptions — see the design note above), which
   is fine by design, but the customer's own current plan's button was
