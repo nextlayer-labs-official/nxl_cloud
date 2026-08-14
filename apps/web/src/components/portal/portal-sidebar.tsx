@@ -65,14 +65,14 @@ export function PortalSidebar() {
           <button
             type="button"
             onClick={() => setNewMenuOpen((v) => !v)}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-[0_4px_12px_-4px_oklch(0.55_0.18_255_/_0.5)]"
+            className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex cursor-pointer items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-[0_4px_12px_-4px_oklch(0.55_0.18_255_/_0.5)]"
           >
             <Plus className="h-4 w-4" />
             New
             <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", newMenuOpen && "rotate-180")} />
           </button>
           {newMenuOpen && (
-            <div className="border-border-subtle bg-background absolute top-[calc(100%+6px)] left-0 z-10 w-full overflow-hidden rounded-xl border shadow-lg">
+            <div className="border-border-subtle bg-background absolute top-[calc(100%+6px)] left-0 z-10 min-w-[200px] overflow-hidden rounded-xl border shadow-lg">
               <button
                 type="button"
                 onClick={() => {

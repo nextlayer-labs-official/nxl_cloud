@@ -8,10 +8,9 @@ import { cn } from "@/lib/utils";
 import type { FolderItem } from "@/types/portal";
 import { ItemCheckbox } from "./item-checkbox";
 import { ItemContextMenu } from "./item-context-menu";
-import { NavIcon } from "./nav-icon";
 import { useClickOrDoubleClick } from "./use-click-or-double-click";
 
-interface FolderCardProps {
+interface FolderChipProps {
   folder: FolderItem;
   selected: boolean;
   /** Returns true if the click was consumed by selection (shouldn't navigate). */
@@ -22,7 +21,8 @@ interface FolderCardProps {
   onRename: (name: string) => void;
 }
 
-export function FolderCard({
+/** Compact pill-style folder item — Drive always renders folders this way, in their own row, regardless of the file list's grid/list mode. */
+export function FolderChip({
   folder,
   selected,
   onSelectAttempt,
@@ -30,7 +30,7 @@ export function FolderCard({
   onShare,
   onDelete,
   onRename,
-}: FolderCardProps) {
+}: FolderChipProps) {
   const router = useRouter();
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(folder.name);
@@ -66,7 +66,7 @@ export function FolderCard({
         { label: "Delete", icon: Trash2, onSelect: onDelete, destructive: true, separatorBefore: true },
       ]}
     >
-      <div className={cn("group relative", selected && "z-[1]")}>
+      <div className={cn("group relative inline-flex", selected && "z-[1]")}>
         <Link
           href={`/portal/folder/${folder.id}`}
           onClick={(e) => {
@@ -74,14 +74,12 @@ export function FolderCard({
             handleClick(e);
           }}
           className={cn(
-            "border-border-subtle bg-background hover:border-border-strong hover:shadow-[0_8px_20px_-12px_oklch(0.22_0.02_260_/_0.2)] flex items-center gap-3 rounded-xl border p-4 transition",
+            "border-border-subtle bg-surface-muted hover:bg-surface-muted-2 hover:border-border-strong flex h-10 min-w-[180px] max-w-[240px] items-center gap-2 rounded-lg border py-1.5 pr-3 pl-2 transition",
             selected && "border-primary ring-primary/20 ring-2",
           )}
         >
           <ItemCheckbox checked={selected} onToggle={onToggleCheckbox} label={`Select ${folder.name}`} />
-          <div className="bg-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-            <NavIcon icon={FolderIcon} className="text-accent-foreground h-5 w-5" />
-          </div>
+          <FolderIcon className="text-ink-400 h-4 w-4 shrink-0" />
           {renaming ? (
             <input
               ref={inputRef}
@@ -101,10 +99,10 @@ export function FolderCard({
                   setRenaming(false);
                 }
               }}
-              className="border-input bg-background text-foreground min-w-0 flex-1 rounded-md border px-2 py-1 text-[14px] font-medium outline-none"
+              className="border-input bg-background text-foreground min-w-0 flex-1 rounded-md border px-1.5 py-0.5 text-[13px] font-medium outline-none"
             />
           ) : (
-            <span className="text-foreground truncate text-[14px] font-medium">{folder.name}</span>
+            <span className="text-foreground min-w-0 truncate text-[13px] font-medium">{folder.name}</span>
           )}
           {folder.isShared && <Link2 className="text-ink-400 h-3.5 w-3.5 shrink-0" aria-label="Shared" />}
         </Link>
