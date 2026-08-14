@@ -20,14 +20,15 @@ const PERIOD_MS: Record<BillingCycle, number> = {
 };
 const CYCLE_DAYS: Record<BillingCycle, number> = { MONTHLY: 30, ANNUAL: 365 };
 
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
 interface OrderNotes {
   organizationId?: string;
   planId?: string;
   billingCycle?: string;
-  /** "true" for a prorated mid-cycle plan switch — preserves the existing period
-   *  instead of starting a fresh one, since the customer already paid for it. */
+  /** "true" for a prorated upgrade order — on activation, resets creditBalanceCents
+   *  to 0 (it was fully consumed toward this charge; see createUpgradeOrder). */
   prorated?: string;
-  preservePeriodEnd?: string;
 }
 
 @Injectable()
@@ -52,6 +53,45 @@ export class BillingService {
     return this.razorpay;
   }
 
+  /**
+   * Pure arithmetic, no side effects — shared by `createOrder` (which commits)
+   * and `getOrderPreview` (which doesn't), so a quote can never drift from
+   * what actually gets charged.
+   */
+  private computeListAmount(listPriceCents: number, discountPercent: number | null): number {
+    return discountPercent ? Math.round((listPriceCents * (100 - discountPercent)) / 100) : listPriceCents;
+  }
+
+  /**
+   * Pure arithmetic, no side effects — shared by `createUpgradeOrder` (which
+   * commits) and `getOrderPreview` (which doesn't).
+   */
+  private computeUpgradeProration(
+    existingSubscription: Subscription & { plan: Plan },
+    newPlan: Plan,
+    cycle: BillingCycle,
+  ): { unusedOldValueCents: number; proratedNewCostCents: number; netCents: number; daysRemaining: number } {
+    const totalCycleDays = CYCLE_DAYS[cycle];
+    const daysRemaining = Math.max(
+      0,
+      Math.ceil((existingSubscription.currentPeriodEnd!.getTime() - Date.now()) / DAY_MS),
+    );
+
+    const oldListPrice =
+      cycle === "ANNUAL" ? existingSubscription.plan.priceYearlyCents : existingSubscription.plan.priceMonthlyCents;
+    const newListPrice = cycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
+
+    const unusedOldValueCents = Math.round(((oldListPrice ?? 0) * daysRemaining) / totalCycleDays);
+    const proratedNewCostCents = Math.round(((newListPrice ?? 0) * daysRemaining) / totalCycleDays);
+    let netCents = Math.max(0, proratedNewCostCents - unusedOldValueCents);
+
+    if (netCents > 0 && existingSubscription.discountPercent) {
+      netCents = Math.round((netCents * (100 - existingSubscription.discountPercent)) / 100);
+    }
+
+    return { unusedOldValueCents, proratedNewCostCents, netCents, daysRemaining };
+  }
+
   async listPlans() {
     const plans = await prisma.plan.findMany();
     // MySQL sorts NULL first on ASC — sort in JS instead so "Custom" pricing (null) lands last.
@@ -69,11 +109,14 @@ export class BillingService {
   }
 
   /**
-   * Same plan (renewal) or a fresh/first purchase: full price, charged immediately,
-   * fresh `currentPeriodEnd` from today. A genuine mid-cycle switch to a *different*
-   * plan while there's still paid time left goes through `createProratedSwitchOrder`
-   * instead — real day-based proration, not the "upgrade full price / downgrade
-   * scheduled for renewal" rule this replaced.
+   * Same plan (renewal), a fresh/first purchase, or a plan change made after
+   * the previous period already lapsed: full price, charged immediately,
+   * fresh `currentPeriodEnd` from today. A genuine mid-cycle *upgrade* while
+   * there's still paid time left goes through `createUpgradeOrder` instead
+   * (real proration, credit consumed, fresh period). A mid-cycle
+   * *downgrade* is refused outright — downgrades only take effect once the
+   * current period ends, at which point it's just a normal purchase like
+   * any other (this branch), not a special case.
    */
   async createOrder(userId: string, dto: CreateOrderDto) {
     const membership = await this.organizations.getPrimaryMembership(userId);
@@ -86,14 +129,33 @@ export class BillingService {
       include: { plan: true },
     });
 
-    const isPlanSwitch =
+    const isPlanChange = !!existingSubscription && existingSubscription.plan.id !== plan.id;
+    if (isPlanChange) {
+      await this.assertStorageFitsPlan(membership.organizationId, existingSubscription!, plan);
+    }
+
+    const hasActivePeriod =
       existingSubscription?.status === "ACTIVE" &&
       !!existingSubscription.currentPeriodEnd &&
-      existingSubscription.currentPeriodEnd > new Date() &&
-      existingSubscription.plan.id !== plan.id;
+      existingSubscription.currentPeriodEnd > new Date();
 
-    if (isPlanSwitch) {
-      return this.createProratedSwitchOrder(membership.organizationId, existingSubscription, plan);
+    if (isPlanChange && hasActivePeriod) {
+      const cycle = existingSubscription!.billingCycle;
+      const oldListPrice =
+        cycle === "ANNUAL"
+          ? existingSubscription!.plan.priceYearlyCents
+          : existingSubscription!.plan.priceMonthlyCents;
+      const newListPrice = cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+      const isUpgrade = (newListPrice ?? 0) > (oldListPrice ?? 0);
+
+      if (isUpgrade) {
+        return this.createUpgradeOrder(membership.organizationId, existingSubscription!, plan);
+      }
+
+      const readableDate = existingSubscription!.currentPeriodEnd!.toISOString().slice(0, 10);
+      throw new BadRequestException(
+        `You can switch to ${plan.name} once your current plan ends on ${readableDate} — downgrades take effect at renewal, not immediately.`,
+      );
     }
 
     const listPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
@@ -107,9 +169,7 @@ export class BillingService {
     // checks out (here), not retroactively to whatever they already paid for their
     // current period. This is the only place it's actually charged; it's cosmetic
     // everywhere else in the UI.
-    const amount = existingSubscription?.discountPercent
-      ? Math.round((listPrice * (100 - existingSubscription.discountPercent)) / 100)
-      : listPrice;
+    const amount = this.computeListAmount(listPrice, existingSubscription?.discountPercent ?? null);
 
     // Razorpay caps `receipt` at 40 chars — org/plan context lives in `notes` instead,
     // this is just a short unique reference.
@@ -135,39 +195,26 @@ export class BillingService {
   }
 
   /**
-   * Real day-based proration, no partial refunds (Razorpay doesn't do those
-   * automatically) — a downgrade's unused value becomes account credit instead,
-   * consumed against the next charge. Plan switches immediately either way;
-   * `currentPeriodEnd` and `billingCycle` are preserved, not reset, since the
-   * customer already paid through that date.
+   * Upgrading: the unused value of the current plan is credited against the
+   * new plan's prorated cost (plus any existing account credit, e.g. an
+   * admin grant). Real day-based proration, no partial refunds (Razorpay
+   * doesn't do those automatically). The plan switches immediately either
+   * way; `currentPeriodEnd` always resets to a fresh period from the switch
+   * date (via `activateSubscription`'s normal behavior) — the customer is
+   * paying for a new, better period, not just topping up the old one.
    */
-  private async createProratedSwitchOrder(
+  private async createUpgradeOrder(
     organizationId: string,
     existingSubscription: Subscription & { plan: Plan },
     newPlan: Plan,
   ) {
     const cycle = existingSubscription.billingCycle;
-    const totalCycleDays = CYCLE_DAYS[cycle];
-    const daysRemaining = Math.max(
-      0,
-      Math.ceil((existingSubscription.currentPeriodEnd!.getTime() - Date.now()) / DAY_MS),
-    );
-
-    const oldListPrice =
-      cycle === "ANNUAL" ? existingSubscription.plan.priceYearlyCents : existingSubscription.plan.priceMonthlyCents;
     const newListPrice = cycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
     if (newListPrice === null) {
       throw new BadRequestException("This plan isn't available for self-serve checkout.");
     }
 
-    const unusedOldValue = Math.round(((oldListPrice ?? 0) * daysRemaining) / totalCycleDays);
-    const proratedNewCost = Math.round((newListPrice * daysRemaining) / totalCycleDays);
-    let netCents = proratedNewCost - unusedOldValue;
-
-    if (netCents > 0 && existingSubscription.discountPercent) {
-      netCents = Math.round((netCents * (100 - existingSubscription.discountPercent)) / 100);
-    }
-
+    const { netCents } = this.computeUpgradeProration(existingSubscription, newPlan, cycle);
     const creditAvailable = existingSubscription.creditBalanceCents;
     const amountAfterCredit = netCents - creditAvailable;
 
@@ -176,7 +223,11 @@ export class BillingService {
       const newCreditBalance = creditAvailable - netCents;
       const updated = await prisma.subscription.update({
         where: { organizationId },
-        data: { planId: newPlan.id, creditBalanceCents: newCreditBalance },
+        data: {
+          planId: newPlan.id,
+          currentPeriodEnd: new Date(Date.now() + PERIOD_MS[cycle]),
+          creditBalanceCents: newCreditBalance,
+        },
         include: { plan: true },
       });
       return {
@@ -197,7 +248,6 @@ export class BillingService {
         planId: newPlan.id,
         billingCycle: cycle,
         prorated: "true",
-        preservePeriodEnd: existingSubscription.currentPeriodEnd!.toISOString(),
       },
     });
 
@@ -208,6 +258,203 @@ export class BillingService {
       amount: order.amount,
       currency: order.currency,
       keyId: this.keyId,
+    };
+  }
+
+  /**
+   * Returns a human-readable reason if the org's current storage usage
+   * wouldn't fit under `targetPlan`'s effective limit (its own
+   * `storageLimitGbOverride` if admin-set, otherwise the plan's default), or
+   * null if it fits. Read-only, no throw — shared by `assertStorageFitsPlan`
+   * (which throws) and `getOrderPreview` (which surfaces it as `blocked`).
+   */
+  private async checkStorageFit(
+    organizationId: string,
+    existingSubscription: Subscription,
+    targetPlan: Plan,
+  ): Promise<string | null> {
+    const limitBytes = this.organizations.effectiveLimitBytes({
+      storageLimitGbOverride: existingSubscription.storageLimitGbOverride,
+      plan: { storageLimitGb: targetPlan.storageLimitGb },
+    });
+    if (limitBytes === null) return null;
+
+    const usedBytes = await this.organizations.getUsedBytes(organizationId);
+    if (usedBytes > limitBytes) {
+      const usedGb = (usedBytes / BYTES_PER_GB).toFixed(1);
+      const limitGb = (limitBytes / BYTES_PER_GB).toFixed(1);
+      return `You're using ${usedGb} GB, which is more than the ${limitGb} GB ${targetPlan.name} plan allows. Free up space before switching.`;
+    }
+    return null;
+  }
+
+  /**
+   * Refuses any plan change (upgrade or downgrade) that would leave the org
+   * storing more than the target plan's effective limit allows. In practice
+   * this only ever bites on a downgrade (a plan change that increases the
+   * limit can't newly violate it), but it's checked unconditionally for any
+   * plan change rather than assuming that.
+   */
+  private async assertStorageFitsPlan(
+    organizationId: string,
+    existingSubscription: Subscription,
+    targetPlan: Plan,
+  ) {
+    const reason = await this.checkStorageFit(organizationId, existingSubscription, targetPlan);
+    if (reason) throw new BadRequestException(reason);
+  }
+
+  /**
+   * Read-only preview of what `createOrder` would do for the same
+   * `(planId, billingCycle)` — same branching (`isPlanChange`,
+   * `hasActivePeriod`, `isUpgrade`), same pure helpers
+   * (`computeListAmount`/`computeUpgradeProration`) and the same
+   * `checkStorageFit`, but never creates a Razorpay order or writes to the
+   * database. Used to power the checkout confirmation screen; its numbers
+   * are guaranteed to match what `createOrder` actually commits, since both
+   * call the exact same helpers.
+   */
+  async getOrderPreview(userId: string, dto: CreateOrderDto) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+
+    const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
+    if (!plan) throw new NotFoundException("Plan not found.");
+
+    const existingSubscription = await prisma.subscription.findUnique({
+      where: { organizationId: membership.organizationId },
+      include: { plan: true },
+    });
+
+    const isPlanChange = !!existingSubscription && existingSubscription.plan.id !== plan.id;
+
+    const base = {
+      planName: plan.name,
+      currentPlanName: existingSubscription?.plan.name ?? null,
+      currentPeriodEnd: existingSubscription?.currentPeriodEnd?.toISOString() ?? null,
+    };
+
+    if (isPlanChange) {
+      const storageReason = await this.checkStorageFit(
+        membership.organizationId,
+        existingSubscription!,
+        plan,
+      );
+      if (storageReason) {
+        return {
+          ...base,
+          kind: "purchase" as const,
+          blocked: true,
+          blockedReason: storageReason,
+          listPriceCents: null,
+          discountPercent: null,
+          unusedOldValueCents: null,
+          proratedNewCostCents: null,
+          amountPayableCents: 0,
+          creditAppliedCents: 0,
+          daysRemaining: null,
+          newPeriodEndPreview: null,
+          availableOn: null,
+        };
+      }
+    }
+
+    const hasActivePeriod =
+      existingSubscription?.status === "ACTIVE" &&
+      !!existingSubscription.currentPeriodEnd &&
+      existingSubscription.currentPeriodEnd > new Date();
+
+    if (isPlanChange && hasActivePeriod) {
+      const cycle = existingSubscription!.billingCycle;
+      const oldListPrice =
+        cycle === "ANNUAL"
+          ? existingSubscription!.plan.priceYearlyCents
+          : existingSubscription!.plan.priceMonthlyCents;
+      const newListPrice = cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+      const isUpgrade = (newListPrice ?? 0) > (oldListPrice ?? 0);
+
+      if (isUpgrade) {
+        const { unusedOldValueCents, proratedNewCostCents, netCents, daysRemaining } =
+          this.computeUpgradeProration(existingSubscription!, plan, cycle);
+        const creditAvailable = existingSubscription!.creditBalanceCents;
+        const amountPayableCents = Math.max(0, netCents - creditAvailable);
+        const creditAppliedCents = Math.min(creditAvailable, netCents);
+        return {
+          ...base,
+          kind: "upgrade" as const,
+          blocked: false,
+          blockedReason: null,
+          listPriceCents: newListPrice,
+          discountPercent: existingSubscription!.discountPercent,
+          unusedOldValueCents,
+          proratedNewCostCents,
+          amountPayableCents,
+          creditAppliedCents,
+          daysRemaining,
+          newPeriodEndPreview: new Date(Date.now() + PERIOD_MS[cycle]).toISOString(),
+          availableOn: null,
+        };
+      }
+
+      return {
+        ...base,
+        kind: "downgrade" as const,
+        blocked: true,
+        blockedReason: `You can switch to ${plan.name} once your current plan ends on ${existingSubscription!.currentPeriodEnd!.toISOString().slice(0, 10)} — downgrades take effect at renewal, not immediately.`,
+        listPriceCents: null,
+        discountPercent: null,
+        unusedOldValueCents: null,
+        proratedNewCostCents: null,
+        amountPayableCents: 0,
+        creditAppliedCents: 0,
+        daysRemaining: null,
+        newPeriodEndPreview: null,
+        availableOn: existingSubscription!.currentPeriodEnd!.toISOString(),
+      };
+    }
+
+    const listPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+    if (!listPrice) {
+      return {
+        ...base,
+        kind: "purchase" as const,
+        blocked: true,
+        blockedReason: "This plan isn't available for self-serve checkout.",
+        listPriceCents: null,
+        discountPercent: null,
+        unusedOldValueCents: null,
+        proratedNewCostCents: null,
+        amountPayableCents: 0,
+        creditAppliedCents: 0,
+        daysRemaining: null,
+        newPeriodEndPreview: null,
+        availableOn: null,
+      };
+    }
+
+    const amountPayableCents = this.computeListAmount(
+      listPrice,
+      existingSubscription?.discountPercent ?? null,
+    );
+    const kind = !existingSubscription
+      ? ("purchase" as const)
+      : existingSubscription.plan.id === plan.id
+        ? ("renew" as const)
+        : ("downgrade" as const); // a plan change reached here only once the old period has lapsed
+
+    return {
+      ...base,
+      kind,
+      blocked: false,
+      blockedReason: null,
+      listPriceCents: listPrice,
+      discountPercent: existingSubscription?.discountPercent ?? null,
+      unusedOldValueCents: null,
+      proratedNewCostCents: null,
+      amountPayableCents,
+      creditAppliedCents: 0,
+      daysRemaining: null,
+      newPeriodEndPreview: new Date(Date.now() + PERIOD_MS[dto.billingCycle]).toISOString(),
+      availableOn: null,
     };
   }
 
@@ -245,7 +492,7 @@ export class BillingService {
       order.amount as number,
       dto.razorpayOrderId,
       dto.razorpayPaymentId,
-      notes.prorated === "true" && notes.preservePeriodEnd ? new Date(notes.preservePeriodEnd) : undefined,
+      notes.prorated === "true",
     );
 
     return prisma.subscription.findUnique({
@@ -255,10 +502,13 @@ export class BillingService {
   }
 
   /**
-   * `preservePeriodEnd` set = a prorated mid-cycle switch: keep the existing
-   * period instead of starting a fresh one, and zero out the credit balance that
-   * was just consumed to help pay for it. Unset = a fresh purchase/renewal:
-   * start a brand-new period from today, same as always.
+   * Always starts a fresh `currentPeriodEnd` from now — a plain purchase/
+   * renewal and a paid upgrade-switch both work this way (a mid-cycle
+   * downgrade never reaches here at all; `createOrder` refuses it outright,
+   * see its own doc comment). `wasProratedUpgrade` zeroes out the credit
+   * balance, since a paid upgrade order only ever gets created after
+   * existing credit was fully applied toward it (see `createUpgradeOrder`)
+   * — a plain purchase/renewal leaves any existing credit untouched.
    */
   private async activateSubscription(
     organizationId: string,
@@ -267,7 +517,7 @@ export class BillingService {
     amountCents: number,
     razorpayOrderId: string,
     razorpayPaymentId: string,
-    preservePeriodEnd?: Date,
+    wasProratedUpgrade: boolean,
   ) {
     const existingPayment = await prisma.payment.findUnique({ where: { razorpayPaymentId } });
     if (existingPayment) return; // webhook + client-side verify can both fire for the same payment
@@ -276,10 +526,10 @@ export class BillingService {
       planId,
       status: "ACTIVE" as const,
       billingCycle,
-      currentPeriodEnd: preservePeriodEnd ?? new Date(Date.now() + PERIOD_MS[billingCycle]),
+      currentPeriodEnd: new Date(Date.now() + PERIOD_MS[billingCycle]),
       razorpayOrderId,
       razorpayPaymentId,
-      ...(preservePeriodEnd && { creditBalanceCents: 0 }),
+      ...(wasProratedUpgrade && { creditBalanceCents: 0 }),
     };
     await prisma.$transaction([
       prisma.subscription.upsert({
@@ -342,9 +592,7 @@ export class BillingService {
             payment.amount,
             payment.order_id,
             payment.id,
-            notes.prorated === "true" && notes.preservePeriodEnd
-              ? new Date(notes.preservePeriodEnd)
-              : undefined,
+            notes.prorated === "true",
           );
         }
         break;

@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Headers, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
+import type { BillingCycle } from "@nextlayer/database";
 import type { Request } from "express";
 import { SessionGuard } from "../auth/guards/session.guard";
 import { BillingService } from "./billing.service";
@@ -25,6 +26,17 @@ export class BillingController {
   @UseGuards(SessionGuard)
   createOrder(@Req() req: Request, @Body() dto: CreateOrderDto) {
     return this.billing.createOrder(req.user!.id, dto);
+  }
+
+  /** Read-only preview of what POST /order would do — powers the checkout confirmation screen. */
+  @Get("quote")
+  @UseGuards(SessionGuard)
+  getOrderPreview(
+    @Req() req: Request,
+    @Query("planId") planId: string,
+    @Query("billingCycle") billingCycle: BillingCycle,
+  ) {
+    return this.billing.getOrderPreview(req.user!.id, { planId, billingCycle });
   }
 
   @Post("verify")

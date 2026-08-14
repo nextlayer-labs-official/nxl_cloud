@@ -22,8 +22,13 @@ export class OrganizationsService {
     return membership;
   }
 
-  /** null = unlimited. Admin-set `storageLimitGbOverride` wins over the plan's default. */
-  private effectiveLimitBytes(
+  /**
+   * null = unlimited. Admin-set `storageLimitGbOverride` wins over the plan's
+   * default — public so BillingService can check a *prospective* plan's limit
+   * (e.g. "would this org's current usage fit under the plan they're
+   * downgrading to?") without duplicating the override-fallback rule.
+   */
+  effectiveLimitBytes(
     subscription: { storageLimitGbOverride: number | null; plan: { storageLimitGb: number | null } } | null,
   ): number | null {
     const gb = subscription?.storageLimitGbOverride ?? subscription?.plan.storageLimitGb ?? null;
@@ -54,13 +59,19 @@ export class OrganizationsService {
     };
   }
 
+  /** Raw current storage usage for an org, in bytes — shared by quota checks and the downgrade storage-fit gate. */
+  async getUsedBytes(organizationId: string): Promise<number> {
+    const usage = await prisma.file.aggregate({
+      where: { organizationId, deletedAt: null },
+      _sum: { sizeBytes: true },
+    });
+    return usage._sum.sizeBytes ?? 0;
+  }
+
   /** Throws if uploading `additionalBytes` more would push the org over its effective storage limit. */
   async assertWithinQuota(organizationId: string, additionalBytes: number) {
-    const [usage, subscription] = await Promise.all([
-      prisma.file.aggregate({
-        where: { organizationId, deletedAt: null },
-        _sum: { sizeBytes: true },
-      }),
+    const [usedBytes, subscription] = await Promise.all([
+      this.getUsedBytes(organizationId),
       prisma.subscription.findUnique({
         where: { organizationId },
         include: { plan: true },
@@ -70,7 +81,6 @@ export class OrganizationsService {
     const limitBytes = this.effectiveLimitBytes(subscription);
     if (limitBytes === null) return;
 
-    const usedBytes = usage._sum.sizeBytes ?? 0;
     if (usedBytes + additionalBytes > limitBytes) {
       const limitGb = (limitBytes / BYTES_PER_GB).toFixed(1);
       throw new BadRequestException(
