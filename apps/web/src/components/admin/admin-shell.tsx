@@ -12,10 +12,16 @@ import { AdminContext } from "./admin-context";
 type LoadState = { status: "loading" } | { status: "ready"; adminUser: AdminUser } | { status: "error" };
 
 const NAV_LINKS = [
-  { href: "/admin", label: "Organizations" },
+  { href: "/admin", label: "Overview" },
+  { href: "/admin/organizations", label: "Organizations" },
   { href: "/admin/plans", label: "Plans" },
   { href: "/admin/audit-log", label: "Audit Log" },
 ];
+
+/** "/admin" is a prefix of every other admin path, so it needs an exact match; every other link should stay highlighted on its own nested/detail routes (e.g. /admin/organizations/:id). */
+function isNavLinkActive(pathname: string, href: string): boolean {
+  return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+}
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -60,7 +66,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 href={link.href}
                 className={cn(
                   "rounded-lg px-3 py-2 text-[13px] font-semibold",
-                  pathname === link.href
+                  isNavLinkActive(pathname, link.href)
                     ? "bg-accent text-accent-foreground"
                     : "text-ink-600 hover:bg-surface-muted",
                 )}

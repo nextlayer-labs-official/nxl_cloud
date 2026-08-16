@@ -30,6 +30,7 @@ export interface FileItem {
   sizeBytes: number;
   folderId: string | null;
   createdAt: string;
+  updatedAt: string;
   isShared: boolean;
   isStarred: boolean;
 }
@@ -40,6 +41,10 @@ export interface BreadcrumbEntry {
 }
 
 export interface TrashedFile extends FileItem {
+  deletedAt: string;
+}
+
+export interface TrashedFolder extends FolderItem {
   deletedAt: string;
 }
 

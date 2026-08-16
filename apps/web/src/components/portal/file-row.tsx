@@ -131,7 +131,7 @@ export const FileRow = forwardRef<ItemHandle, FileRowProps>(function FileRow(
       </td>
       <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap md:table-cell">
         <ItemContextMenu actions={actions}>
-          <div className="contents">{formatDate(file.createdAt)}</div>
+          <div className="contents">{formatDate(file.updatedAt)}</div>
         </ItemContextMenu>
       </td>
       <td className="px-5 py-3">

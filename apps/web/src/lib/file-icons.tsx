@@ -10,21 +10,38 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-const RULES: Array<{ test: RegExp; icon: LucideIcon }> = [
-  { test: /^image\//, icon: FileImage },
-  { test: /^video\//, icon: FileVideo },
-  { test: /^audio\//, icon: FileAudio },
-  { test: /pdf|msword|wordprocessingml|rtf/, icon: FileText },
-  { test: /spreadsheet|ms-excel/, icon: FileSpreadsheet },
-  { test: /zip|rar|7z|tar|gzip/, icon: FileArchive },
-  { test: /json|javascript|typescript|xml|x-python|x-sh|html|css/, icon: FileCode },
-  { test: /^text\//, icon: FileText },
+export type FileCategory = "image" | "video" | "audio" | "document" | "spreadsheet" | "archive" | "code" | "other";
+
+const RULES: Array<{ test: RegExp; icon: LucideIcon; category: FileCategory }> = [
+  { test: /^image\//, icon: FileImage, category: "image" },
+  { test: /^video\//, icon: FileVideo, category: "video" },
+  { test: /^audio\//, icon: FileAudio, category: "audio" },
+  { test: /pdf|msword|wordprocessingml|rtf/, icon: FileText, category: "document" },
+  { test: /spreadsheet|ms-excel/, icon: FileSpreadsheet, category: "spreadsheet" },
+  { test: /zip|rar|7z|tar|gzip/, icon: FileArchive, category: "archive" },
+  { test: /json|javascript|typescript|xml|x-python|x-sh|html|css/, icon: FileCode, category: "code" },
+  { test: /^text\//, icon: FileText, category: "document" },
 ];
 
 export function getFileIcon(mimeType: string): LucideIcon {
   const match = RULES.find((rule) => rule.test.test(mimeType));
   return match?.icon ?? FileIcon;
 }
+
+export function getFileCategory(mimeType: string): FileCategory {
+  return RULES.find((rule) => rule.test.test(mimeType))?.category ?? "other";
+}
+
+export const FILE_CATEGORY_LABELS: Record<FileCategory, string> = {
+  image: "Images",
+  video: "Videos",
+  audio: "Audio",
+  document: "Documents",
+  spreadsheet: "Spreadsheets",
+  archive: "Archives",
+  code: "Code",
+  other: "Other",
+};
 
 export type PreviewKind = "image" | "pdf" | "text" | "video" | "audio" | "none";
 

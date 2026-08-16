@@ -11,6 +11,7 @@ import type {
   AdminOrganizationDetail,
   AdminTransaction,
 } from "@/types/admin";
+import { humanizeAuditAction } from "./audit-action-labels";
 import { SubscriptionOverrideModal } from "./subscription-override-modal";
 
 function formatDateTime(iso: string): string {
@@ -23,6 +24,8 @@ function formatDateTime(iso: string): string {
   });
 }
 
+type DetailTab = "overview" | "members" | "billing" | "activity";
+
 export function OrganizationDetailView({ orgId }: { orgId: string }) {
   const [org, setOrg] = useState<AdminOrganizationDetail | null>(null);
   const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
@@ -30,6 +33,7 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [overriding, setOverriding] = useState(false);
+  const [tab, setTab] = useState<DetailTab>("overview");
 
   function load() {
     Promise.all([
@@ -64,17 +68,24 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
   if (error) return <p className="text-error-text text-sm">{error}</p>;
   if (!org) return <div className="text-ink-450 text-sm">Loading…</div>;
 
+  const TABS: { key: DetailTab; label: string }[] = [
+    { key: "overview", label: "Overview" },
+    { key: "members", label: `Members (${org.members.length})` },
+    { key: "billing", label: "Billing" },
+    { key: "activity", label: `Activity (${auditLog.length})` },
+  ];
+
   return (
     <div>
       <Link
-        href="/admin"
+        href="/admin/organizations"
         className="text-ink-450 hover:text-foreground mb-4 flex items-center gap-1.5 text-[13px] font-medium"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
         Organizations
       </Link>
 
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">{org.name}</h1>
           <p className="text-ink-450 text-sm">{org.slug}</p>
@@ -105,133 +116,158 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-3 gap-4">
-        <div className="border-border-subtle rounded-xl border p-4">
-          <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Created</div>
-          <div className="text-foreground mt-1 text-[15px] font-semibold">
-            {formatDate(org.createdAt)}
-          </div>
-        </div>
-        <div className="border-border-subtle rounded-xl border p-4">
-          <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Members</div>
-          <div className="text-foreground mt-1 text-[15px] font-semibold">{org.members.length}</div>
-        </div>
-        <div className="border-border-subtle rounded-xl border p-4">
-          <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Storage</div>
-          <div className="text-foreground mt-1 text-[15px] font-semibold">
-            {formatBytes(org.storageUsedBytes)}
-            <span className="text-ink-450">
-              {" / "}
-              {(() => {
-                const limitGb = org.subscription?.storageLimitGbOverride ?? org.subscription?.plan.storageLimitGb;
-                return limitGb == null ? "Unlimited" : `${limitGb} GB`;
-              })()}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="border-border-subtle mb-6 rounded-xl border p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-foreground text-[15px] font-semibold">Subscription</h2>
+      <div className="bg-surface-muted mb-8 inline-flex items-center gap-1 rounded-full p-1">
+        {TABS.map((t) => (
           <button
+            key={t.key}
             type="button"
-            onClick={() => setOverriding(true)}
-            className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
+            onClick={() => setTab(t.key)}
+            className={cn(
+              "cursor-pointer rounded-full px-4 py-2 text-sm font-semibold transition",
+              tab === t.key ? "bg-background text-foreground shadow-sm" : "text-ink-550 hover:text-foreground",
+            )}
           >
-            Change plan
+            {t.label}
           </button>
-        </div>
-        {org.subscription ? (
-          <div className="flex flex-col gap-1 text-[13px]">
-            <div className="text-foreground font-semibold">
-              {org.subscription.plan.name} · {org.subscription.status}
-            </div>
-            <div className="text-ink-450">
-              {org.subscription.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
-              {org.subscription.currentPeriodEnd &&
-                ` · ${org.subscription.status === "TRIALING" ? "trial ends" : "renews"} ${formatDate(org.subscription.currentPeriodEnd)}`}
-            </div>
-            {org.subscription.discountPercent ? (
-              <div className="text-success font-medium">{org.subscription.discountPercent}% off</div>
-            ) : null}
-            {org.subscription.freeUntil && new Date(org.subscription.freeUntil) > new Date() && (
-              <div className="text-success font-medium">
-                Comped until {formatDate(org.subscription.freeUntil)}
-              </div>
-            )}
-            {org.subscription.creditBalanceCents > 0 && (
-              <div className="text-success font-medium">
-                ₹{(org.subscription.creditBalanceCents / 100).toFixed(2)} account credit
-              </div>
-            )}
+        ))}
+      </div>
+
+      {tab === "overview" && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="border-border-subtle rounded-xl border p-4">
+            <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Created</div>
+            <div className="text-foreground mt-1 text-[15px] font-semibold">{formatDate(org.createdAt)}</div>
           </div>
-        ) : (
-          <p className="text-ink-450 text-[13px]">No subscription yet.</p>
-        )}
-      </div>
-
-      <div className="border-border-subtle mb-6 rounded-xl border p-5">
-        <h2 className="text-foreground mb-4 text-[15px] font-semibold">Members</h2>
-        <div className="flex flex-col gap-3">
-          {org.members.map((member) => (
-            <div key={member.id} className="flex items-center justify-between text-[13px]">
-              <div>
-                <div className="text-foreground font-medium">{member.name}</div>
-                <div className="text-ink-450">{member.email}</div>
-              </div>
-              <div className="text-ink-450">{member.role}</div>
+          <div className="border-border-subtle rounded-xl border p-4">
+            <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Members</div>
+            <div className="text-foreground mt-1 text-[15px] font-semibold">{org.members.length}</div>
+          </div>
+          <div className="border-border-subtle rounded-xl border p-4">
+            <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Storage</div>
+            <div className="text-foreground mt-1 text-[15px] font-semibold">
+              {formatBytes(org.storageUsedBytes)}
+              <span className="text-ink-450">
+                {" / "}
+                {(() => {
+                  const limitGb = org.subscription?.storageLimitGbOverride ?? org.subscription?.plan.storageLimitGb;
+                  return limitGb == null ? "Unlimited" : `${limitGb} GB`;
+                })()}
+              </span>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      <div className="border-border-subtle mb-6 rounded-xl border p-5">
-        <h2 className="text-foreground mb-4 text-[15px] font-semibold">Transaction history</h2>
-        {transactions.length === 0 ? (
-          <p className="text-ink-450 text-[13px]">No transactions yet.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {transactions.map((tx) => (
-              <div key={tx.id} className="flex items-center justify-between text-[13px]">
-                <div>
-                  <div className="text-foreground font-medium">{tx.plan.name}</div>
-                  <div className="text-ink-450">
-                    {formatDate(tx.createdAt)} · {tx.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
-                  </div>
-                </div>
+          <div className="border-border-subtle rounded-xl border p-5 sm:col-span-3">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-foreground text-[15px] font-semibold">Subscription</h2>
+              <button
+                type="button"
+                onClick={() => setOverriding(true)}
+                className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
+              >
+                Change plan
+              </button>
+            </div>
+            {org.subscription ? (
+              <div className="flex flex-col gap-1 text-[13px]">
                 <div className="text-foreground font-semibold">
-                  ₹{(tx.amountCents / 100).toFixed(2)}
+                  {org.subscription.plan.name} · {org.subscription.status}
                 </div>
+                <div className="text-ink-450">
+                  {org.subscription.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
+                  {org.subscription.currentPeriodEnd &&
+                    ` · ${org.subscription.status === "TRIALING" ? "trial ends" : "renews"} ${formatDate(org.subscription.currentPeriodEnd)}`}
+                </div>
+                {org.subscription.discountPercent ? (
+                  <div className="text-success font-medium">{org.subscription.discountPercent}% off</div>
+                ) : null}
+                {org.subscription.freeUntil && new Date(org.subscription.freeUntil) > new Date() && (
+                  <div className="text-success font-medium">
+                    Comped until {formatDate(org.subscription.freeUntil)}
+                  </div>
+                )}
+                {org.subscription.creditBalanceCents > 0 && (
+                  <div className="text-success font-medium">
+                    ₹{(org.subscription.creditBalanceCents / 100).toFixed(2)} account credit
+                  </div>
+                )}
               </div>
-            ))}
+            ) : (
+              <p className="text-ink-450 text-[13px]">No subscription yet.</p>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="border-border-subtle rounded-xl border p-5">
-        <h2 className="text-foreground mb-4 text-[15px] font-semibold">Activity</h2>
-        {auditLog.length === 0 ? (
-          <p className="text-ink-450 text-[13px]">No activity recorded yet.</p>
-        ) : (
+      {tab === "members" && (
+        <div className="border-border-subtle rounded-xl border p-5">
           <div className="flex flex-col gap-3">
-            {auditLog.map((entry) => (
-              <div key={entry.id} className="flex items-center justify-between text-[13px]">
-                <div>
-                  <div className="text-foreground font-medium">
-                    {entry.action}
-                    {entry.targetType && <span className="text-ink-450"> · {entry.targetType}</span>}
+            {org.members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between text-[13px]">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-accent text-accent-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold">
+                    {member.name.slice(0, 1).toUpperCase()}
                   </div>
-                  <div className="text-ink-450">
-                    {entry.actor ? `${entry.actor.name} (${entry.actor.email})` : "system"}
+                  <div>
+                    <div className="text-foreground font-medium">{member.name}</div>
+                    <div className="text-ink-450">{member.email}</div>
                   </div>
                 </div>
-                <div className="text-ink-450 shrink-0">{formatDateTime(entry.createdAt)}</div>
+                <span className="bg-surface-muted text-ink-600 rounded-full px-2.5 py-1 text-[11px] font-semibold">
+                  {member.role}
+                </span>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {tab === "billing" && (
+        <div className="flex flex-col gap-4">
+          <div className="border-border-subtle rounded-xl border p-5">
+            <h2 className="text-foreground mb-4 text-[15px] font-semibold">Transaction history</h2>
+            {transactions.length === 0 ? (
+              <p className="text-ink-450 text-[13px]">No transactions yet.</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {transactions.map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between text-[13px]">
+                    <div>
+                      <div className="text-foreground font-medium">{tx.plan.name}</div>
+                      <div className="text-ink-450">
+                        {formatDate(tx.createdAt)} · {tx.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
+                      </div>
+                    </div>
+                    <div className="text-foreground font-semibold">₹{(tx.amountCents / 100).toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "activity" && (
+        <div className="border-border-subtle rounded-xl border p-5">
+          {auditLog.length === 0 ? (
+            <p className="text-ink-450 text-[13px]">No activity recorded yet.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {auditLog.map((entry) => (
+                <div key={entry.id} className="flex items-center justify-between text-[13px]">
+                  <div>
+                    <div className="text-foreground font-medium">
+                      <span className="font-semibold">{entry.actor?.name ?? "System"}</span>{" "}
+                      {humanizeAuditAction(entry.action)}
+                    </div>
+                    {entry.actor && <div className="text-ink-450">{entry.actor.email}</div>}
+                  </div>
+                  <div className="text-ink-450 shrink-0">{formatDateTime(entry.createdAt)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {overriding && (
         <SubscriptionOverrideModal

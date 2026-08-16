@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
-import { getFileIcon } from "@/lib/file-icons";
+import { getFileCategory, getFileIcon } from "@/lib/file-icons";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/types/portal";
@@ -30,6 +30,7 @@ import { useRegisterBrowserActions } from "./browser-actions-context";
 import { FileCard } from "./file-card";
 import { FilePreviewModal } from "./file-preview-modal";
 import { FileRow, type ItemHandle } from "./file-row";
+import { FilterBar, modifiedFilterCutoff, type ModifiedFilter, type TypeFilter } from "./filter-bar";
 import { FolderChipRow } from "./folder-chip-row";
 import { InfoPanel, InfoToggleButton, type InfoSubject } from "./info-panel";
 import { ItemContextMenu } from "./item-context-menu";
@@ -128,6 +129,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     dir: "asc",
   });
   const [viewMode, setViewModeState] = useState<ViewMode>("list");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [modifiedFilter, setModifiedFilter] = useState<ModifiedFilter>("any");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -532,25 +535,36 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   }
 
   const isEmpty = !loading && folders.length === 0 && files.length === 0;
+  const hasActiveFilters = typeFilter !== "all" || modifiedFilter !== "any";
   const pageTitle = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "My Files";
 
   // Folders are always their own compact chip row now (not part of the file
   // grid/list), so they no longer share the file table's sort controls —
-  // always alphabetical, matching Drive's convention.
-  const sortedFolders = useMemo(
-    () => [...folders].sort((a, b) => a.name.localeCompare(b.name)),
-    [folders],
-  );
+  // always alphabetical, matching Drive's convention. A Type filter hides
+  // folders entirely (matching Drive — a folder has no "type" to match).
+  const sortedFolders = useMemo(() => {
+    if (typeFilter !== "all") return [];
+    return [...folders].sort((a, b) => a.name.localeCompare(b.name));
+  }, [folders, typeFilter]);
 
   const sortedFiles = useMemo(() => {
+    const cutoff = modifiedFilterCutoff(modifiedFilter);
+    const filtered = files.filter((f) => {
+      if (typeFilter !== "all" && getFileCategory(f.mimeType) !== typeFilter) return false;
+      if (cutoff && new Date(f.updatedAt) < cutoff) return false;
+      return true;
+    });
     const dir = sort.dir === "asc" ? 1 : -1;
-    return [...files].sort((a, b) => {
+    return filtered.sort((a, b) => {
       if (sort.key === "size") return (a.sizeBytes - b.sizeBytes) * dir;
       if (sort.key === "date")
-        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
+        return (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()) * dir;
       return a.name.localeCompare(b.name) * dir;
     });
-  }, [files, sort]);
+  }, [files, sort, typeFilter, modifiedFilter]);
+
+  const isFilteredEmpty =
+    !isEmpty && !loading && hasActiveFilters && sortedFolders.length === 0 && sortedFiles.length === 0;
 
   // Folders always precede files regardless of sort key — standard Explorer/Drive convention.
   // The folder chip row and file grid/list are visually separate, but selection
@@ -708,6 +722,15 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
         <input ref={fileInputRef} type="file" hidden multiple onChange={handleUpload} />
       </div>
+
+      {!isSearching && !loading && !isEmpty && (
+        <FilterBar
+          typeFilter={typeFilter}
+          onTypeFilterChange={setTypeFilter}
+          modifiedFilter={modifiedFilter}
+          onModifiedFilterChange={setModifiedFilter}
+        />
+      )}
 
       {creatingFolder && (
         <NewFolderModal
@@ -925,6 +948,24 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             </button>
           </div>
         </ItemContextMenu>
+      ) : isFilteredEmpty ? (
+        <div className="border-border-subtle flex flex-col items-center rounded-xl border border-dashed py-20 text-center">
+          <div className="bg-surface-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+            <SearchX className="text-ink-400 h-6 w-6" />
+          </div>
+          <p className="text-foreground text-[15px] font-semibold">No items match your filters</p>
+          <p className="text-ink-450 mt-1 text-sm">Try a different type or time range.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter("all");
+              setModifiedFilter("any");
+            }}
+            className="text-foreground hover:bg-surface-muted mt-5 cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+          >
+            Clear filters
+          </button>
+        </div>
       ) : (
         <ItemContextMenu
           actions={[
@@ -958,7 +999,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             onRename={(folder, name) => handleRename("folder", folder.id, name)}
           />
 
-          {viewMode === "grid" ? (
+          {sortedFiles.length === 0 ? null : viewMode === "grid" ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {sortedFiles.map((file, j) => {
                 const index = sortedFolders.length + j;
@@ -1025,7 +1066,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                         onClick={() => toggleSort("date")}
                         className="text-ink-450 hover:text-foreground flex cursor-pointer items-center gap-1 text-xs font-semibold tracking-wide uppercase"
                       >
-                        Uploaded
+                        Last modified
                         {sort.key === "date" &&
                           (sort.dir === "asc" ? (
                             <ChevronUp className="h-3.5 w-3.5" />

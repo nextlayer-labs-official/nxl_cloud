@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Check, Loader2, Plus } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
 import type { AdminPlan } from "@/types/admin";
 import { PlanFormModal } from "./plan-form-modal";
 
 function formatPrice(cents: number | null): string {
-  return cents === null ? "Custom" : `₹${(cents / 100).toFixed(2)}`;
+  return cents === null ? "Custom" : `₹${(cents / 100).toFixed(0)}`;
 }
 
 export function PlansView() {
@@ -64,31 +64,51 @@ export function PlansView() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {plans.map((plan) => (
-            <div key={plan.id} className="border-border-subtle flex flex-col rounded-xl border p-5">
-              <div className="flex items-center gap-2">
-                <div className="text-foreground text-[16px] font-semibold">{plan.name}</div>
-                {plan.isDefault && (
-                  <span className="bg-accent text-accent-foreground rounded-full px-2 py-0.5 text-[11px] font-semibold">
-                    Default
-                  </span>
+            <div key={plan.id} className="border-border-subtle relative flex flex-col rounded-xl border p-5">
+              {plan.isDefault && (
+                <span className="bg-primary text-primary-foreground absolute top-0 right-4 -translate-y-1/2 rounded-full px-2.5 py-1 text-[11px] font-semibold">
+                  Default
+                </span>
+              )}
+
+              <div className="text-foreground text-[16px] font-semibold">{plan.name}</div>
+
+              <div className="mt-2 flex items-baseline gap-1.5">
+                {plan.priceMonthlyCents === null ? (
+                  <span className="text-foreground text-[24px] font-bold">Custom</span>
+                ) : (
+                  <>
+                    <span className="text-foreground text-[28px] font-bold tracking-[-0.01em]">
+                      {formatPrice(plan.priceMonthlyCents)}
+                    </span>
+                    <span className="text-ink-450 text-[13px]">/mo</span>
+                  </>
                 )}
               </div>
-              <div className="text-ink-450 mt-0.5 text-[13px]">
-                {formatPrice(plan.priceMonthlyCents)}/mo · {formatPrice(plan.priceYearlyCents)}/yr
+              <div className="text-ink-450 mt-0.5 text-[12px]">
+                {plan.priceYearlyCents === null ? "No annual price set" : `${formatPrice(plan.priceYearlyCents)}/yr`}
               </div>
-              <div className="text-ink-450 mt-2 text-[13px]">
+
+              <div className="text-ink-600 mt-3 text-[13px] font-medium">
                 {plan.storageLimitGb === null ? "Unlimited storage" : `${plan.storageLimitGb} GB storage`}
               </div>
               <div className="text-ink-450 mt-1 text-[13px]">
                 {plan.trialEnabled ? `${plan.trialDays}-day trial` : "No trial — starts active"}
               </div>
+
               {plan.features.length > 0 && (
-                <ul className="text-ink-600 mt-3 flex flex-col gap-1 text-[13px]">
+                <ul className="mt-4 flex flex-col gap-2">
                   {plan.features.map((f, i) => (
-                    <li key={i}>· {f}</li>
+                    <li key={i} className="text-ink-600 flex items-start gap-2 text-[13px]">
+                      <Check className="text-success mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{f}</span>
+                    </li>
                   ))}
                 </ul>
               )}
+
+              <div className="flex-1" />
+
               <div className="mt-4 flex gap-2">
                 <button
                   type="button"

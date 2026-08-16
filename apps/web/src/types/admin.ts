@@ -84,6 +84,17 @@ export interface AdminPlan {
   updatedAt: string;
 }
 
+export interface AdminOverview {
+  organizations: { total: number; active: number; suspended: number };
+  totalUsers: number;
+  totalStorageUsedBytes: number;
+  subscriptionsByStatus: Record<SubscriptionStatus, number>;
+  /** Derived from currently-ACTIVE subscriptions' plan pricing — an estimate, not a guaranteed recurring charge (billing is one-time orders, not auto-renewing subscriptions). */
+  estimatedMrrCents: number;
+  revenue: { allTimeCents: number; last30dCents: number };
+  signups: { last7d: number; last30d: number };
+}
+
 export interface AdminAuditLogEntry {
   id: string;
   action: string;

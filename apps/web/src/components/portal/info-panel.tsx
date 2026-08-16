@@ -80,7 +80,9 @@ const ACTION_LABELS: Record<string, string> = {
   "folder.created": "created this folder",
   "folder.renamed": "renamed this folder",
   "folder.moved": "moved this folder",
-  "folder.deleted": "deleted this folder",
+  "folder.trashed": "deleted this folder",
+  "folder.restored": "restored this folder",
+  "folder.deleted": "permanently deleted this folder",
   "folder.shared": "shared this folder",
   "folder.unshared": "stopped sharing this folder",
 };

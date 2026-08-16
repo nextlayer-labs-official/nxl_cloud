@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -10,12 +10,26 @@ import type { AdminOrganization } from "@/types/admin";
 import { NewCustomerModal } from "./new-customer-modal";
 import { SubscriptionOverrideModal } from "./subscription-override-modal";
 
+type StatusFilter = "all" | "active" | "suspended";
+
+const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "suspended", label: "Suspended" },
+];
+
+function initials(name: string): string {
+  return name.slice(0, 1).toUpperCase();
+}
+
 export function OrganizationsView() {
   const [organizations, setOrganizations] = useState<AdminOrganization[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [overrideTarget, setOverrideTarget] = useState<AdminOrganization | null>(null);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   function load() {
     api
@@ -39,9 +53,25 @@ export function OrganizationsView() {
     }
   }
 
+  const filtered = useMemo(() => {
+    if (!organizations) return null;
+    const q = query.trim().toLowerCase();
+    return organizations.filter((org) => {
+      if (statusFilter === "active" && org.suspendedAt) return false;
+      if (statusFilter === "suspended" && !org.suspendedAt) return false;
+      if (!q) return true;
+      return (
+        org.name.toLowerCase().includes(q) ||
+        org.slug.toLowerCase().includes(q) ||
+        org.owner?.name.toLowerCase().includes(q) ||
+        org.owner?.email.toLowerCase().includes(q)
+      );
+    });
+  }, [organizations, query, statusFilter]);
+
   return (
     <div>
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">Organizations</h1>
           <p className="text-ink-450 text-sm">
@@ -58,10 +88,44 @@ export function OrganizationsView() {
         </button>
       </div>
 
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="border-input bg-background flex w-full max-w-xs items-center gap-2 rounded-lg border px-3 py-2">
+          <Search className="text-ink-400 h-4 w-4 shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name, slug, or owner…"
+            className="text-foreground placeholder:text-ink-450 min-w-0 flex-1 bg-transparent text-sm outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStatusFilter(f.key)}
+              className={cn(
+                "cursor-pointer rounded-lg px-3 py-1.5 text-[13px] font-semibold",
+                statusFilter === f.key
+                  ? "bg-accent text-accent-foreground"
+                  : "text-ink-600 hover:bg-surface-muted",
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error && <p className="text-error-text text-sm">{error}</p>}
 
-      {!organizations ? (
+      {!filtered ? (
         <div className="text-ink-450 text-sm">Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className="border-border-subtle rounded-xl border border-dashed py-16 text-center">
+          <p className="text-foreground text-[15px] font-semibold">No organizations match</p>
+          <p className="text-ink-450 mt-1 text-sm">Try a different search or filter.</p>
+        </div>
       ) : (
         <div className="border-border-subtle overflow-hidden rounded-xl border">
           <table className="w-full text-left text-sm">
@@ -78,16 +142,18 @@ export function OrganizationsView() {
               </tr>
             </thead>
             <tbody>
-              {organizations.map((org) => (
-                <tr key={org.id} className="border-border-subtle border-b last:border-0">
+              {filtered.map((org) => (
+                <tr key={org.id} className="border-border-subtle hover:bg-surface-muted/50 border-b last:border-0">
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/admin/organizations/${org.id}`}
-                      className="text-foreground font-semibold hover:underline"
-                    >
-                      {org.name}
+                    <Link href={`/admin/organizations/${org.id}`} className="flex items-center gap-2.5">
+                      <div className="bg-primary text-primary-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold">
+                        {initials(org.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-foreground truncate font-semibold hover:underline">{org.name}</div>
+                        <div className="text-ink-450 truncate text-[12px]">{org.slug}</div>
+                      </div>
                     </Link>
-                    <div className="text-ink-450 text-[12px]">{org.slug}</div>
                   </td>
                   <td className="px-4 py-3">
                     {org.owner ? (

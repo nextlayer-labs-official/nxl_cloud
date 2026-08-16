@@ -1,5 +1,5 @@
-import { OrganizationsView } from "@/components/admin/organizations-view";
+import { AdminOverviewView } from "@/components/admin/admin-overview-view";
 
-export default function AdminOrganizationsPage() {
-  return <OrganizationsView />;
+export default function AdminOverviewPage() {
+  return <AdminOverviewView />;
 }

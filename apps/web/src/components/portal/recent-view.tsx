@@ -129,7 +129,7 @@ export function RecentView() {
                       {formatBytes(file.sizeBytes)}
                     </td>
                     <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap md:table-cell">
-                      {formatDate(file.createdAt)}
+                      {formatDate(file.updatedAt)}
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
