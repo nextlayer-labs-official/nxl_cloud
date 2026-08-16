@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } fro
 import type { Request } from "express";
 import { SessionGuard } from "../auth/guards/session.guard";
 import { ConfirmUploadDto } from "./dto/confirm-upload.dto";
+import { MoveFileDto } from "./dto/move-file.dto";
 import { RenameFileDto } from "./dto/rename-file.dto";
 import { RequestUploadUrlDto } from "./dto/request-upload-url.dto";
 import { FilesService } from "./files.service";
@@ -26,6 +27,11 @@ export class FilesController {
     return this.filesService.listTrash(req.user!.id);
   }
 
+  @Get("recent")
+  getRecent(@Req() req: Request) {
+    return this.filesService.getRecent(req.user!.id);
+  }
+
   @Get(":id/download-url")
   getDownloadUrl(@Req() req: Request, @Param("id") id: string) {
     return this.filesService.getDownloadUrl(req.user!.id, id);
@@ -45,6 +51,16 @@ export class FilesController {
   @Patch(":id")
   rename(@Req() req: Request, @Param("id") id: string, @Body() dto: RenameFileDto) {
     return this.filesService.rename(req.user!.id, id, dto);
+  }
+
+  @Patch(":id/move")
+  move(@Req() req: Request, @Param("id") id: string, @Body() dto: MoveFileDto) {
+    return this.filesService.move(req.user!.id, id, dto);
+  }
+
+  @Get(":id/activity")
+  getActivity(@Req() req: Request, @Param("id") id: string) {
+    return this.filesService.getActivity(req.user!.id, id);
   }
 
   @Post(":id/restore")
@@ -67,6 +83,18 @@ export class FilesController {
   @Delete(":id/share")
   async removeShareLink(@Req() req: Request, @Param("id") id: string) {
     await this.filesService.removeShareLink(req.user!.id, id);
+    return { success: true };
+  }
+
+  @Post(":id/star")
+  async star(@Req() req: Request, @Param("id") id: string) {
+    await this.filesService.star(req.user!.id, id);
+    return { success: true };
+  }
+
+  @Delete(":id/star")
+  async unstar(@Req() req: Request, @Param("id") id: string) {
+    await this.filesService.unstar(req.user!.id, id);
     return { success: true };
   }
 }

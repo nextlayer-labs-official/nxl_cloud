@@ -69,6 +69,7 @@ model User {
   shareLinksCreated  ShareLink[]
   comments           Comment[]
   auditLogs          AuditLog[]
+  stars              Star[]
 }
 
 model Organization {
@@ -88,6 +89,7 @@ model Organization {
   subscription  Subscription?
   payments      Payment[]
   ssoConnection SsoConnection?
+  stars         Star[]
 }
 
 model Membership {
@@ -259,6 +261,23 @@ model AuditLog {
   actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
+}
+
+/// Per-user favorites — starring is personal, not shared across an org (unlike
+/// ShareLink/Permission, which are org-visible), so it's keyed by userId too.
+model Star {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  resourceType   ResourceType
+  resourceId     String
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resourceType, resourceId])
+  @@index([organizationId, userId])
 }
 
 model Session {
