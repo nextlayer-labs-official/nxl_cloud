@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Loader2, Trash2, X } from "lucide-react";
+import { Download, FolderInput, Loader2, Trash2, X } from "lucide-react";
 import { InfoToggleButton } from "./info-panel";
 
 interface SelectionBarProps {
@@ -8,13 +8,23 @@ interface SelectionBarProps {
   busy: boolean;
   onClear: () => void;
   onDownload: () => void;
+  onMove: () => void;
   onDelete: () => void;
   infoOpen: boolean;
   onToggleInfo: () => void;
 }
 
 /** Replaces the breadcrumb/title header row in place while items are selected — matches Drive's contextual toolbar swap rather than adding a separate banner. */
-export function SelectionBar({ count, busy, onClear, onDownload, onDelete, infoOpen, onToggleInfo }: SelectionBarProps) {
+export function SelectionBar({
+  count,
+  busy,
+  onClear,
+  onDownload,
+  onMove,
+  onDelete,
+  infoOpen,
+  onToggleInfo,
+}: SelectionBarProps) {
   return (
     <>
       <div className="flex items-center gap-3">
@@ -37,6 +47,15 @@ export function SelectionBar({ count, busy, onClear, onDownload, onDelete, infoO
         >
           <Download className="h-3.5 w-3.5" />
           Download
+        </button>
+        <button
+          type="button"
+          onClick={onMove}
+          disabled={busy}
+          className="text-ink-600 hover:bg-surface-muted flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-60"
+        >
+          <FolderInput className="h-3.5 w-3.5" />
+          Move
         </button>
         <button
           type="button"

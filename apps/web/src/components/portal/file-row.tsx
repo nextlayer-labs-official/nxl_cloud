@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Download, Link2, Pencil, Share2, Trash2 } from "lucide-react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { Download, FolderInput, Link2, Pencil, Share2, Star, Trash2 } from "lucide-react";
 import { getFileIcon } from "@/lib/file-icons";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -10,30 +10,43 @@ import { ItemCheckbox } from "./item-checkbox";
 import { ItemContextMenu } from "./item-context-menu";
 import { useClickOrDoubleClick } from "./use-click-or-double-click";
 
+export interface ItemHandle {
+  startRename: () => void;
+}
+
 interface FileRowProps {
   file: FileItem;
   selected: boolean;
+  focused?: boolean;
   onSelectAttempt: (e: React.MouseEvent) => boolean;
   onToggleCheckbox: () => void;
   onOpen: () => void;
   onDownload: () => void;
   onShare: () => void;
+  onMove: () => void;
+  onToggleStar: () => void;
   onDelete: () => void;
   onRename: (name: string) => void;
 }
 
 /** List-mode row for a file, part of the unified folders+files table. */
-export function FileRow({
-  file,
-  selected,
-  onSelectAttempt,
-  onToggleCheckbox,
-  onOpen,
-  onDownload,
-  onShare,
-  onDelete,
-  onRename,
-}: FileRowProps) {
+export const FileRow = forwardRef<ItemHandle, FileRowProps>(function FileRow(
+  {
+    file,
+    selected,
+    focused,
+    onSelectAttempt,
+    onToggleCheckbox,
+    onOpen,
+    onDownload,
+    onShare,
+    onMove,
+    onToggleStar,
+    onDelete,
+    onRename,
+  },
+  ref,
+) {
   const Icon = getFileIcon(file.mimeType);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(file.name);
@@ -44,6 +57,8 @@ export function FileRow({
     setRenaming(true);
     requestAnimationFrame(() => inputRef.current?.select());
   }
+
+  useImperativeHandle(ref, () => ({ startRename }));
 
   function commitRename() {
     setRenaming(false);
@@ -58,22 +73,26 @@ export function FileRow({
 
   const handleClick = useClickOrDoubleClick(openOrSelect, startRename);
 
+  const actions = [
+    { label: "Download", icon: Download, onSelect: onDownload },
+    { label: "Rename", icon: Pencil, onSelect: startRename },
+    { label: "Share", icon: Share2, onSelect: onShare },
+    { label: "Move to...", icon: FolderInput, onSelect: onMove },
+    { label: file.isStarred ? "Remove from Starred" : "Add to Starred", icon: Star, onSelect: onToggleStar },
+    { label: "Delete", icon: Trash2, onSelect: onDelete, destructive: true, separatorBefore: true },
+  ];
+
   return (
     <tr
+      onContextMenu={(e) => e.stopPropagation()}
       className={cn(
         "group border-border-subtle hover:bg-surface-muted-2 border-b last:border-b-0",
         selected && "bg-surface-muted-2",
+        focused && "outline-primary outline-2 -outline-offset-2",
       )}
     >
       <td className="px-5 py-3">
-        <ItemContextMenu
-          actions={[
-            { label: "Download", icon: Download, onSelect: onDownload },
-            { label: "Rename", icon: Pencil, onSelect: startRename },
-            { label: "Share", icon: Share2, onSelect: onShare },
-            { label: "Delete", icon: Trash2, onSelect: onDelete, destructive: true, separatorBefore: true },
-          ]}
-        >
+        <ItemContextMenu actions={actions}>
           <div onClick={handleClick} className="flex cursor-pointer items-center gap-3">
             <ItemCheckbox checked={selected} onToggle={onToggleCheckbox} label={`Select ${file.name}`} />
             <Icon className="text-ink-400 h-[18px] w-[18px] shrink-0" />
@@ -106,39 +125,45 @@ export function FileRow({
         </ItemContextMenu>
       </td>
       <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap sm:table-cell">
-        {formatBytes(file.sizeBytes)}
+        <ItemContextMenu actions={actions}>
+          <div className="contents">{formatBytes(file.sizeBytes)}</div>
+        </ItemContextMenu>
       </td>
       <td className="text-ink-450 hidden px-5 py-3 text-[13px] whitespace-nowrap md:table-cell">
-        {formatDate(file.createdAt)}
+        <ItemContextMenu actions={actions}>
+          <div className="contents">{formatDate(file.createdAt)}</div>
+        </ItemContextMenu>
       </td>
       <td className="px-5 py-3">
-        <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
-          <button
-            type="button"
-            onClick={onDownload}
-            className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
-            aria-label={`Download ${file.name}`}
-          >
-            <Download className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onShare}
-            className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
-            aria-label={`Share ${file.name}`}
-          >
-            <Share2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="text-ink-400 hover:text-error-text hover:bg-background cursor-pointer rounded-md p-1.5"
-            aria-label={`Delete ${file.name}`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
+        <ItemContextMenu actions={actions}>
+          <div className="flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100">
+            <button
+              type="button"
+              onClick={onDownload}
+              className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
+              aria-label={`Download ${file.name}`}
+            >
+              <Download className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onShare}
+              className="text-ink-400 hover:text-foreground hover:bg-background cursor-pointer rounded-md p-1.5"
+              aria-label={`Share ${file.name}`}
+            >
+              <Share2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              className="text-ink-400 hover:text-error-text hover:bg-background cursor-pointer rounded-md p-1.5"
+              aria-label={`Delete ${file.name}`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </ItemContextMenu>
       </td>
     </tr>
   );
-}
+});

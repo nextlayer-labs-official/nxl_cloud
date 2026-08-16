@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Download,
   Folder as FolderIcon,
+  FolderInput,
   FolderPlus,
   Inbox,
   Link2,
@@ -28,10 +29,11 @@ import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/typ
 import { useRegisterBrowserActions } from "./browser-actions-context";
 import { FileCard } from "./file-card";
 import { FilePreviewModal } from "./file-preview-modal";
-import { FileRow } from "./file-row";
+import { FileRow, type ItemHandle } from "./file-row";
 import { FolderChipRow } from "./folder-chip-row";
 import { InfoPanel, InfoToggleButton, type InfoSubject } from "./info-panel";
 import { ItemContextMenu } from "./item-context-menu";
+import { MoveModal } from "./move-modal";
 import { NavIcon } from "./nav-icon";
 import { NewFolderModal } from "./new-folder-modal";
 import { SelectionBar } from "./selection-bar";
@@ -128,7 +130,18 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   const [viewMode, setViewModeState] = useState<ViewMode>("list");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [moveTarget, setMoveTarget] = useState<
+    { items: SelectableItem[]; label: string; excludeFolderId?: string } | null
+  >(null);
+  const [cutItems, setCutItems] = useState<SelectableItem[] | null>(null);
   const dragCounter = useRef(0);
+  const itemRefs = useRef<Map<string, ItemHandle>>(new Map());
+
+  function registerItemRef(id: string, el: ItemHandle | null) {
+    if (el) itemRefs.current.set(id, el);
+    else itemRefs.current.delete(id);
+  }
 
   useEffect(() => {
     const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
@@ -210,6 +223,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   // shouldn't silently wipe the current selection.
   useEffect(() => {
     selection.clear();
+    setFocusedIndex(null);
+    setCutItems(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- selection.clear is stable; only folderId should trigger this reset
   }, [folderId]);
 
@@ -334,6 +349,22 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     }
   }
 
+  async function handleToggleStar(type: "file" | "folder", id: string, currentlyStarred: boolean) {
+    setActionError(null);
+    const path = type === "file" ? `/files/${id}/star` : `/folders/${id}/star`;
+    try {
+      if (currentlyStarred) await api.delete(path);
+      else await api.post(path);
+      if (type === "file") {
+        setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, isStarred: !currentlyStarred } : f)));
+      } else {
+        setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, isStarred: !currentlyStarred } : f)));
+      }
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't update starred status.");
+    }
+  }
+
   async function handleRename(type: "file" | "folder", id: string, name: string) {
     setActionError(null);
     try {
@@ -397,6 +428,107 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     } finally {
       setBulkBusy(false);
     }
+  }
+
+  async function moveItems(items: SelectableItem[], destinationFolderId: string | null) {
+    return Promise.allSettled(
+      items.map(({ id, type }) =>
+        type === "file"
+          ? api.patch(`/files/${id}/move`, { folderId: destinationFolderId })
+          : api.patch(`/folders/${id}/move`, { parentId: destinationFolderId }),
+      ),
+    );
+  }
+
+  function openMoveModal(items: SelectableItem[], label: string, excludeFolderId?: string) {
+    setMoveTarget({ items, label, excludeFolderId });
+  }
+
+  function openBulkMoveModal() {
+    const entries = [...selection.selected.entries()];
+    if (entries.length === 0) return;
+    if (entries.length === 1) {
+      const [id, type] = entries[0];
+      const name = type === "folder" ? folders.find((f) => f.id === id)?.name : files.find((f) => f.id === id)?.name;
+      openMoveModal([{ id, type }], name ?? "1 item", type === "folder" ? id : undefined);
+      return;
+    }
+    openMoveModal(
+      entries.map(([id, type]) => ({ id, type })),
+      `${entries.length} items`,
+    );
+  }
+
+  async function handleMoveConfirm(destinationFolderId: string | null) {
+    if (!moveTarget) return;
+    const results = await moveItems(moveTarget.items, destinationFolderId);
+    const failedCount = results.filter((r) => r.status === "rejected").length;
+    if (failedCount === results.length) {
+      const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+      throw failed?.reason ?? new Error("Couldn't move.");
+    }
+    if (failedCount > 0) {
+      setActionError(
+        `Moved ${results.length - failedCount} of ${results.length} item(s). ${failedCount} failed.`,
+      );
+    }
+    setMoveTarget(null);
+    selection.clear();
+    load();
+    if (isSearching) runSearch(searchQuery.trim());
+  }
+
+  function handleCut() {
+    if (selection.count === 0) return;
+    setCutItems([...selection.selected.entries()].map(([id, type]) => ({ id, type })));
+  }
+
+  async function handlePaste() {
+    if (!cutItems || cutItems.length === 0) return;
+    setActionError(null);
+    const results = await moveItems(cutItems, folderId ?? null);
+    const failedCount = results.filter((r) => r.status === "rejected").length;
+    if (failedCount > 0) {
+      setActionError(
+        `Moved ${cutItems.length - failedCount} of ${cutItems.length} item(s). ${failedCount} failed.`,
+      );
+    }
+    setCutItems(null);
+    load();
+  }
+
+  function moveFocus(direction: "up" | "down", extend: boolean) {
+    const max = allItems.length - 1;
+    if (max < 0) return;
+    const next =
+      focusedIndex === null
+        ? 0
+        : direction === "down"
+          ? Math.min(focusedIndex + 1, max)
+          : Math.max(focusedIndex - 1, 0);
+    setFocusedIndex(next);
+    const item = allItems[next];
+    if (!item) return;
+    if (extend) {
+      selection.handleItemClick(item, next, allItems, { shiftKey: true, ctrlKey: false, metaKey: false });
+    } else {
+      selection.clear();
+      selection.toggle(item, next);
+    }
+  }
+
+  function handleRenameShortcut() {
+    if (selection.count !== 1) return;
+    const [[id]] = selection.selected.entries();
+    itemRefs.current.get(id)?.startRename();
+  }
+
+  function handlePreviewShortcut() {
+    if (selection.count !== 1) return;
+    const [[id, type]] = selection.selected.entries();
+    if (type !== "file") return;
+    const file = files.find((f) => f.id === id);
+    if (file) setPreviewFile(file);
   }
 
   const isEmpty = !loading && folders.length === 0 && files.length === 0;
@@ -469,7 +601,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   }, [isSearching, selection.selected, selection.count, folders, files, breadcrumb, pageTitle]);
 
   useKeyboardShortcuts({
-    enabled: !isSearching && !creatingFolder && !shareTarget && !previewFile && !loading,
+    enabled: !isSearching && !creatingFolder && !shareTarget && !previewFile && !moveTarget && !loading,
     onDelete: handleBulkDelete,
     onSelectAll: () => selection.selectAll(allItems),
     onEscape: () => selection.clear(),
@@ -483,6 +615,11 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
         if (file) setPreviewFile(file);
       }
     },
+    onMoveFocus: moveFocus,
+    onRename: handleRenameShortcut,
+    onPreview: handlePreviewShortcut,
+    onCut: handleCut,
+    onPaste: handlePaste,
   });
 
   return (
@@ -500,6 +637,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             busy={bulkBusy}
             onClear={selection.clear}
             onDownload={handleBulkDownload}
+            onMove={openBulkMoveModal}
             onDelete={handleBulkDelete}
             infoOpen={infoPanelOpen}
             onToggleInfo={() => setInfoPanelOpen((v) => !v)}
@@ -788,15 +926,34 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           </div>
         </ItemContextMenu>
       ) : (
-        <>
+        <ItemContextMenu
+          actions={[
+            { label: "New folder", icon: FolderPlus, onSelect: () => setCreatingFolder(true) },
+            { label: "Upload file", icon: Upload, onSelect: () => fileInputRef.current?.click() },
+            ...(cutItems && cutItems.length > 0
+              ? [
+                  {
+                    label: `Paste ${cutItems.length} item${cutItems.length === 1 ? "" : "s"}`,
+                    icon: FolderInput,
+                    onSelect: handlePaste,
+                    separatorBefore: true,
+                  },
+                ]
+              : []),
+          ]}
+        >
           <FolderChipRow
             folders={sortedFolders}
             isSelected={selection.isSelected}
+            isFocused={(id) => focusedIndex !== null && allItems[focusedIndex]?.id === id}
+            registerRef={registerItemRef}
             onSelectAttempt={(folder, i) => (e) =>
               selection.handleItemClick({ id: folder.id, type: "folder" }, i, allItems, e)
             }
             onToggleCheckbox={(folder, i) => selection.toggle({ id: folder.id, type: "folder" }, i)}
             onShare={(folder) => setShareTarget({ type: "folder", id: folder.id, name: folder.name })}
+            onMove={(folder) => openMoveModal([{ id: folder.id, type: "folder" }], folder.name, folder.id)}
+            onToggleStar={(folder) => handleToggleStar("folder", folder.id, folder.isStarred)}
             onDelete={(folder) => handleDeleteFolder(folder)}
             onRename={(folder, name) => handleRename("folder", folder.id, name)}
           />
@@ -808,8 +965,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                 return (
                   <FileCard
                     key={file.id}
+                    ref={(el) => registerItemRef(file.id, el)}
                     file={file}
                     selected={selection.isSelected(file.id)}
+                    focused={focusedIndex === index}
                     onSelectAttempt={(e) =>
                       selection.handleItemClick({ id: file.id, type: "file" }, index, allItems, e)
                     }
@@ -817,6 +976,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                     onOpen={() => setPreviewFile(file)}
                     onDownload={() => handleDownload(file)}
                     onShare={() => setShareTarget({ type: "file", id: file.id, name: file.name })}
+                    onMove={() => openMoveModal([{ id: file.id, type: "file" }], file.name)}
+                    onToggleStar={() => handleToggleStar("file", file.id, file.isStarred)}
                     onDelete={() => handleDeleteFile(file)}
                     onRename={(name) => handleRename("file", file.id, name)}
                   />
@@ -882,8 +1043,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                     return (
                       <FileRow
                         key={file.id}
+                        ref={(el) => registerItemRef(file.id, el)}
                         file={file}
                         selected={selection.isSelected(file.id)}
+                        focused={focusedIndex === index}
                         onSelectAttempt={(e) =>
                           selection.handleItemClick({ id: file.id, type: "file" }, index, allItems, e)
                         }
@@ -891,6 +1054,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                         onOpen={() => setPreviewFile(file)}
                         onDownload={() => handleDownload(file)}
                         onShare={() => setShareTarget({ type: "file", id: file.id, name: file.name })}
+                        onMove={() => openMoveModal([{ id: file.id, type: "file" }], file.name)}
+                        onToggleStar={() => handleToggleStar("file", file.id, file.isStarred)}
                         onDelete={() => handleDeleteFile(file)}
                         onRename={(name) => handleRename("file", file.id, name)}
                       />
@@ -900,7 +1065,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
               </table>
             </div>
           )}
-        </>
+        </ItemContextMenu>
       )}
 
       {dragActive && (
@@ -995,6 +1160,15 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           file={previewFile}
           onClose={() => setPreviewFile(null)}
           onDownload={() => handleDownload(previewFile)}
+        />
+      )}
+
+      {moveTarget && (
+        <MoveModal
+          label={moveTarget.label}
+          excludeFolderId={moveTarget.excludeFolderId}
+          onClose={() => setMoveTarget(null)}
+          onMove={handleMoveConfirm}
         />
       )}
 

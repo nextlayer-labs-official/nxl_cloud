@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Folder, FolderPlus, Plus, Trash2, Upload, Users } from "lucide-react";
+import { ChevronDown, Clock, Folder, FolderPlus, Plus, Star, Trash2, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -124,6 +124,30 @@ export function PortalSidebar() {
         >
           <NavIcon icon={Users} className="h-4 w-4" />
           Shared
+        </Link>
+        <Link
+          href="/portal/recent"
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold",
+            pathname === "/portal/recent"
+              ? "bg-accent text-accent-foreground"
+              : "text-ink-600 hover:bg-background",
+          )}
+        >
+          <NavIcon icon={Clock} className="h-4 w-4" />
+          Recent
+        </Link>
+        <Link
+          href="/portal/starred"
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold",
+            pathname === "/portal/starred"
+              ? "bg-accent text-accent-foreground"
+              : "text-ink-600 hover:bg-background",
+          )}
+        >
+          <NavIcon icon={Star} className="h-4 w-4" />
+          Starred
         </Link>
         <Link
           href="/portal/trash"

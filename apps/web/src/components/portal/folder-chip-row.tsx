@@ -4,13 +4,18 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { FolderItem } from "@/types/portal";
 import { FolderChip } from "./folder-chip";
+import type { ItemHandle } from "./file-row";
 
 interface FolderChipRowProps {
   folders: FolderItem[];
   isSelected: (id: string) => boolean;
+  isFocused?: (id: string) => boolean;
+  registerRef?: (id: string, el: ItemHandle | null) => void;
   onSelectAttempt: (folder: FolderItem, index: number) => (e: React.MouseEvent) => boolean;
   onToggleCheckbox: (folder: FolderItem, index: number) => void;
   onShare: (folder: FolderItem) => void;
+  onMove: (folder: FolderItem) => void;
+  onToggleStar: (folder: FolderItem) => void;
   onDelete: (folder: FolderItem) => void;
   onRename: (folder: FolderItem, name: string) => void;
 }
@@ -19,9 +24,13 @@ interface FolderChipRowProps {
 export function FolderChipRow({
   folders,
   isSelected,
+  isFocused,
+  registerRef,
   onSelectAttempt,
   onToggleCheckbox,
   onShare,
+  onMove,
+  onToggleStar,
   onDelete,
   onRename,
 }: FolderChipRowProps) {
@@ -47,11 +56,15 @@ export function FolderChipRow({
           {folders.map((folder, i) => (
             <FolderChip
               key={folder.id}
+              ref={registerRef ? (el) => registerRef(folder.id, el) : undefined}
               folder={folder}
               selected={isSelected(folder.id)}
+              focused={isFocused?.(folder.id)}
               onSelectAttempt={onSelectAttempt(folder, i)}
               onToggleCheckbox={() => onToggleCheckbox(folder, i)}
               onShare={() => onShare(folder)}
+              onMove={() => onMove(folder)}
+              onToggleStar={() => onToggleStar(folder)}
               onDelete={() => onDelete(folder)}
               onRename={(name) => onRename(folder, name)}
             />

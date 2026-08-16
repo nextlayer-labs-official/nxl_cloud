@@ -20,6 +20,7 @@ export interface FolderItem {
   parentId: string | null;
   createdAt: string;
   isShared: boolean;
+  isStarred: boolean;
 }
 
 export interface FileItem {
@@ -30,6 +31,7 @@ export interface FileItem {
   folderId: string | null;
   createdAt: string;
   isShared: boolean;
+  isStarred: boolean;
 }
 
 export interface BreadcrumbEntry {
