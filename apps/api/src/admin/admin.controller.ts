@@ -23,6 +23,11 @@ import { AdminSessionGuard } from "./guards/admin-session.guard";
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  @Get("overview")
+  getOverview() {
+    return this.adminService.getOverview();
+  }
+
   @Get("organizations")
   listOrganizations() {
     return this.adminService.listOrganizations();

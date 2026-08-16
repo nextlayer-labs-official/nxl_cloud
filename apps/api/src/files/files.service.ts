@@ -20,7 +20,7 @@ export class FilesService {
   private async assertFolderInOrg(folderId: string | undefined, organizationId: string) {
     if (!folderId) return;
     const folder = await prisma.folder.findUnique({ where: { id: folderId } });
-    if (!folder || folder.organizationId !== organizationId) {
+    if (!folder || folder.organizationId !== organizationId || folder.deletedAt) {
       throw new NotFoundException("Folder not found.");
     }
   }
@@ -144,12 +144,21 @@ export class FilesService {
     return file;
   }
 
+  /** Only files not already swept up by a trashed containing folder — those show up under that folder's own Trash entry instead, not flatly duplicated here. */
   async listTrash(userId: string) {
     const membership = await this.organizations.getPrimaryMembership(userId);
-    return prisma.file.findMany({
-      where: { organizationId: membership.organizationId, deletedAt: { not: null } },
-      orderBy: { deletedAt: "desc" },
-    });
+    const [trashedFolders, trashed] = await Promise.all([
+      prisma.folder.findMany({
+        where: { organizationId: membership.organizationId, deletedAt: { not: null } },
+        select: { id: true },
+      }),
+      prisma.file.findMany({
+        where: { organizationId: membership.organizationId, deletedAt: { not: null } },
+        orderBy: { deletedAt: "desc" },
+      }),
+    ]);
+    const trashedFolderIds = new Set(trashedFolders.map((f) => f.id));
+    return trashed.filter((f) => !f.folderId || !trashedFolderIds.has(f.folderId));
   }
 
   async restore(userId: string, fileId: string) {

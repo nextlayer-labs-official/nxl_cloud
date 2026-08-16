@@ -298,6 +298,83 @@ export class AdminService {
     await prisma.plan.delete({ where: { id } });
   }
 
+  /**
+   * Top-line platform KPIs for the admin dashboard landing page. `estimatedMrrCents`
+   * is exactly that — an estimate derived from currently-ACTIVE subscriptions' plan
+   * pricing, not a guaranteed recurring charge, since billing here is one-time
+   * Razorpay orders per period (see Subscription's schema comment), not auto-renewing
+   * subscriptions. `realizedRevenueCents` is the real number, from actual captured Payments.
+   */
+  async getOverview() {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * DAY_MS);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY_MS);
+
+    const [
+      totalOrganizations,
+      suspendedOrganizations,
+      totalUsers,
+      storageAgg,
+      subscriptionsByStatus,
+      activeSubscriptions,
+      revenueAllTimeAgg,
+      revenueLast30dAgg,
+      signups7d,
+      signups30d,
+    ] = await Promise.all([
+      prisma.organization.count(),
+      prisma.organization.count({ where: { suspendedAt: { not: null } } }),
+      prisma.user.count(),
+      prisma.file.aggregate({ where: { deletedAt: null }, _sum: { sizeBytes: true } }),
+      prisma.subscription.groupBy({ by: ["status"], _count: true }),
+      prisma.subscription.findMany({
+        where: { status: "ACTIVE" },
+        include: { plan: { select: { priceMonthlyCents: true, priceYearlyCents: true } } },
+      }),
+      prisma.payment.aggregate({ _sum: { amountCents: true } }),
+      prisma.payment.aggregate({ where: { createdAt: { gte: thirtyDaysAgo } }, _sum: { amountCents: true } }),
+      prisma.organization.count({ where: { createdAt: { gte: sevenDaysAgo } } }),
+      prisma.organization.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+    ]);
+
+    const estimatedMrrCents = activeSubscriptions.reduce((sum, sub) => {
+      if (sub.freeUntil && sub.freeUntil > now) return sum;
+      const listPriceCents =
+        sub.billingCycle === "ANNUAL"
+          ? sub.plan.priceYearlyCents !== null
+            ? Math.round(sub.plan.priceYearlyCents / 12)
+            : null
+          : sub.plan.priceMonthlyCents;
+      if (listPriceCents === null) return sum;
+      const discounted = sub.discountPercent
+        ? Math.round(listPriceCents * (1 - sub.discountPercent / 100))
+        : listPriceCents;
+      return sum + discounted;
+    }, 0);
+
+    const statusCounts: Record<string, number> = { TRIALING: 0, ACTIVE: 0, PAST_DUE: 0, CANCELED: 0 };
+    for (const row of subscriptionsByStatus) {
+      statusCounts[row.status] = row._count;
+    }
+
+    return {
+      organizations: {
+        total: totalOrganizations,
+        active: totalOrganizations - suspendedOrganizations,
+        suspended: suspendedOrganizations,
+      },
+      totalUsers,
+      totalStorageUsedBytes: storageAgg._sum.sizeBytes ?? 0,
+      subscriptionsByStatus: statusCounts,
+      estimatedMrrCents,
+      revenue: {
+        allTimeCents: revenueAllTimeAgg._sum.amountCents ?? 0,
+        last30dCents: revenueLast30dAgg._sum.amountCents ?? 0,
+      },
+      signups: { last7d: signups7d, last30d: signups30d },
+    };
+  }
+
   async listAuditLog(take = 50, organizationId?: string) {
     return prisma.auditLog.findMany({
       take,

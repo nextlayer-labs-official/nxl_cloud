@@ -140,6 +140,10 @@ model Folder {
   createdById    String
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  /// Soft delete, mirroring File.deletedAt — deleting a folder trashes it and
+  /// cascades the same deletedAt to every descendant folder/file, so the whole
+  /// subtree can be restored (or permanently purged) as one unit.
+  deletedAt      DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   team         Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)

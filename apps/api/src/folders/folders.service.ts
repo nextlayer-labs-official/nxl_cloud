@@ -4,27 +4,31 @@ import { recordAuditLog } from "../audit/audit-log.util";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { activeShareResourceIds, getOrCreateShareLink, revokeShareLink } from "../share/share-link.util";
 import { activeStarResourceIds, addStar, removeStar } from "../star/star.util";
+import { StorageService } from "../storage/storage.service";
 import type { CreateFolderDto } from "./dto/create-folder.dto";
 import type { MoveFolderDto } from "./dto/move-folder.dto";
 import type { RenameFolderDto } from "./dto/rename-folder.dto";
 
 @Injectable()
 export class FoldersService {
-  constructor(private readonly organizations: OrganizationsService) {}
+  constructor(
+    private readonly organizations: OrganizationsService,
+    private readonly storage: StorageService,
+  ) {}
 
   async listContents(userId: string, parentId: string | undefined) {
     const membership = await this.organizations.getPrimaryMembership(userId);
 
     if (parentId) {
       const parent = await prisma.folder.findUnique({ where: { id: parentId } });
-      if (!parent || parent.organizationId !== membership.organizationId) {
+      if (!parent || parent.organizationId !== membership.organizationId || parent.deletedAt) {
         throw new NotFoundException("Folder not found.");
       }
     }
 
     const [folders, files] = await Promise.all([
       prisma.folder.findMany({
-        where: { organizationId: membership.organizationId, parentId: parentId ?? null },
+        where: { organizationId: membership.organizationId, parentId: parentId ?? null, deletedAt: null },
         orderBy: { name: "asc" },
       }),
       prisma.file.findMany({
@@ -80,7 +84,7 @@ export class FoldersService {
 
     const [folders, files] = await Promise.all([
       prisma.folder.findMany({
-        where: { organizationId: membership.organizationId, name: { contains: q } },
+        where: { organizationId: membership.organizationId, deletedAt: null, name: { contains: q } },
         include: { parent: { select: { name: true } } },
         orderBy: { name: "asc" },
         take: 25,
@@ -131,6 +135,7 @@ export class FoldersService {
         sizeBytes: f.sizeBytes,
         folderId: f.folderId,
         createdAt: f.createdAt,
+        updatedAt: f.updatedAt,
         parentName: f.folder?.name ?? "My Files",
         isShared: sharedFileIds.has(f.id),
         isStarred: starredFileIds.has(f.id),
@@ -143,7 +148,7 @@ export class FoldersService {
 
     if (dto.parentId) {
       const parent = await prisma.folder.findUnique({ where: { id: dto.parentId } });
-      if (!parent || parent.organizationId !== membership.organizationId) {
+      if (!parent || parent.organizationId !== membership.organizationId || parent.deletedAt) {
         throw new NotFoundException("Parent folder not found.");
       }
     }
@@ -172,7 +177,7 @@ export class FoldersService {
 
     while (currentId) {
       const folder = await prisma.folder.findUnique({ where: { id: currentId } });
-      if (!folder || folder.organizationId !== membership.organizationId) {
+      if (!folder || folder.organizationId !== membership.organizationId || folder.deletedAt) {
         throw new NotFoundException("Folder not found.");
       }
       trail.unshift({ id: folder.id, name: folder.name });
@@ -185,10 +190,36 @@ export class FoldersService {
   private async getOwnedFolder(userId: string, folderId: string) {
     const membership = await this.organizations.getPrimaryMembership(userId);
     const folder = await prisma.folder.findUnique({ where: { id: folderId } });
-    if (!folder || folder.organizationId !== membership.organizationId) {
+    if (!folder || folder.organizationId !== membership.organizationId || folder.deletedAt) {
       throw new NotFoundException("Folder not found.");
     }
     return folder;
+  }
+
+  private async getTrashedFolder(userId: string, folderId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
+    if (!folder || folder.organizationId !== membership.organizationId || !folder.deletedAt) {
+      throw new NotFoundException("Folder not found in trash.");
+    }
+    return folder;
+  }
+
+  /** BFS walk down the parent-child tree, collecting every descendant folder id (regardless of current trash state) — used to cascade trash/restore/permanent-delete across a whole subtree. */
+  private async collectDescendantFolderIds(rootId: string): Promise<string[]> {
+    const descendants: string[] = [];
+    let frontier = [rootId];
+    while (frontier.length > 0) {
+      const children = await prisma.folder.findMany({
+        where: { parentId: { in: frontier } },
+        select: { id: true },
+      });
+      if (children.length === 0) break;
+      const childIds = children.map((c) => c.id);
+      descendants.push(...childIds);
+      frontier = childIds;
+    }
+    return descendants;
   }
 
   async createShareLink(userId: string, folderId: string) {
@@ -229,11 +260,12 @@ export class FoldersService {
         if (currentId === folder.id) {
           throw new BadRequestException("Can't move a folder into itself or one of its own subfolders.");
         }
-        const current: { parentId: string | null; organizationId: string } | null = await prisma.folder.findUnique({
-          where: { id: currentId },
-          select: { parentId: true, organizationId: true },
-        });
-        if (!current || current.organizationId !== folder.organizationId) {
+        const current: { parentId: string | null; organizationId: string; deletedAt: Date | null } | null =
+          await prisma.folder.findUnique({
+            where: { id: currentId },
+            select: { parentId: true, organizationId: true, deletedAt: true },
+          });
+        if (!current || current.organizationId !== folder.organizationId || current.deletedAt) {
           throw new NotFoundException("Folder not found.");
         }
         currentId = current.parentId;
@@ -258,19 +290,71 @@ export class FoldersService {
     });
   }
 
+  /**
+   * Soft delete, cascading to every descendant folder and file — mirrors
+   * File.remove()'s trash semantics instead of requiring an empty folder.
+   * The Wasabi objects are untouched here; permanentlyDelete is what actually
+   * removes them, same split as files use.
+   */
   async remove(userId: string, folderId: string) {
     const folder = await this.getOwnedFolder(userId, folderId);
+    const descendantIds = await this.collectDescendantFolderIds(folder.id);
+    const allFolderIds = [folder.id, ...descendantIds];
+    const now = new Date();
 
-    const [childFolderCount, fileCount] = await Promise.all([
-      prisma.folder.count({ where: { parentId: folderId } }),
-      prisma.file.count({ where: { folderId, deletedAt: null } }),
+    await prisma.$transaction([
+      prisma.folder.updateMany({ where: { id: { in: allFolderIds } }, data: { deletedAt: now } }),
+      prisma.file.updateMany({
+        where: { folderId: { in: allFolderIds }, deletedAt: null },
+        data: { deletedAt: now },
+      }),
     ]);
-    if (childFolderCount > 0 || fileCount > 0) {
-      throw new BadRequestException("Folder must be empty before it can be deleted.");
-    }
+    await this.logFolderActivity(folder, userId, "folder.trashed");
+  }
 
-    await prisma.folder.delete({ where: { id: folderId } });
+  /**
+   * Restores this folder and every currently-trashed descendant folder/file
+   * under it — a simplification: it doesn't try to distinguish "trashed as
+   * part of this same delete" from "happened to already be trashed
+   * independently," it just restores everything in the subtree that's
+   * currently marked deleted.
+   */
+  async restore(userId: string, folderId: string) {
+    const folder = await this.getTrashedFolder(userId, folderId);
+    const descendantIds = await this.collectDescendantFolderIds(folder.id);
+    const allFolderIds = [folder.id, ...descendantIds];
+
+    await prisma.$transaction([
+      prisma.folder.updateMany({ where: { id: { in: allFolderIds } }, data: { deletedAt: null } }),
+      prisma.file.updateMany({ where: { folderId: { in: allFolderIds } }, data: { deletedAt: null } }),
+    ]);
+    await this.logFolderActivity(folder, userId, "folder.restored");
+  }
+
+  /** Permanently removes this trashed folder, every descendant folder, and every file under the whole subtree (Wasabi objects included). */
+  async permanentlyDelete(userId: string, folderId: string) {
+    const folder = await this.getTrashedFolder(userId, folderId);
+    const descendantIds = await this.collectDescendantFolderIds(folder.id);
+    const allFolderIds = [folder.id, ...descendantIds];
+
+    const filesToDelete = await prisma.file.findMany({ where: { folderId: { in: allFolderIds } } });
+    await Promise.all(filesToDelete.map((f) => this.storage.deleteObject(f.storageKey)));
+    await prisma.file.deleteMany({ where: { folderId: { in: allFolderIds } } });
+    // Deleting just the root cascades to every descendant folder automatically —
+    // Folder.parent has onDelete: Cascade (files don't, hence the explicit cleanup above).
+    await prisma.folder.delete({ where: { id: folder.id } });
     await this.logFolderActivity(folder, userId, "folder.deleted");
+  }
+
+  /** Only "root" trashed folders — ones whose parent isn't also trashed — so a folder swept up by trashing its parent doesn't also show as its own separate Trash entry. Since a trashed parent would appear in this very same query (same org), no second query is needed to know which parents are trashed. */
+  async listTrash(userId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const trashed = await prisma.folder.findMany({
+      where: { organizationId: membership.organizationId, deletedAt: { not: null } },
+      orderBy: { deletedAt: "desc" },
+    });
+    const trashedIds = new Set(trashed.map((f) => f.id));
+    return trashed.filter((f) => !f.parentId || !trashedIds.has(f.parentId));
   }
 
   async star(userId: string, folderId: string) {
@@ -296,7 +380,7 @@ export class FoldersService {
     const [folders, files] = await Promise.all([
       folderIds.length
         ? prisma.folder.findMany({
-            where: { id: { in: folderIds }, organizationId: membership.organizationId },
+            where: { id: { in: folderIds }, organizationId: membership.organizationId, deletedAt: null },
           })
         : Promise.resolve([]),
       fileIds.length

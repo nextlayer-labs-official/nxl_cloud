@@ -26,6 +26,11 @@ export class FoldersController {
     return this.foldersService.getStarred(req.user!.id);
   }
 
+  @Get("trash")
+  listTrash(@Req() req: Request) {
+    return this.foldersService.listTrash(req.user!.id);
+  }
+
   @Post()
   create(@Req() req: Request, @Body() dto: CreateFolderDto) {
     return this.foldersService.create(req.user!.id, dto);
@@ -39,6 +44,18 @@ export class FoldersController {
   @Delete(":id")
   async remove(@Req() req: Request, @Param("id") id: string) {
     await this.foldersService.remove(req.user!.id, id);
+    return { success: true };
+  }
+
+  @Post(":id/restore")
+  async restore(@Req() req: Request, @Param("id") id: string) {
+    await this.foldersService.restore(req.user!.id, id);
+    return { success: true };
+  }
+
+  @Delete(":id/permanent")
+  async permanentlyDelete(@Req() req: Request, @Param("id") id: string) {
+    await this.foldersService.permanentlyDelete(req.user!.id, id);
     return { success: true };
   }
 
