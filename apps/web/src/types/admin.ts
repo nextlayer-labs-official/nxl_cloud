@@ -32,6 +32,16 @@ export interface AdminMember {
   email: string;
   role: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
   joinedAt: string;
+  emailVerifiedAt: string | null;
+}
+
+export interface AdminPendingAccessRequest {
+  id: string;
+  resourceType: "FILE" | "FOLDER";
+  resourceName: string;
+  message: string | null;
+  createdAt: string;
+  requestedBy: { id: string; name: string; email: string };
 }
 
 export interface AdminOrganizationDetail {
@@ -41,7 +51,12 @@ export interface AdminOrganizationDetail {
   createdAt: string;
   suspendedAt: string | null;
   storageUsedBytes: number;
+  fileCount: number;
+  folderCount: number;
+  sharedByOrgCount: number;
+  sharedIntoOrgCount: number;
   members: AdminMember[];
+  pendingAccessRequests: AdminPendingAccessRequest[];
   subscription: {
     id: string;
     status: SubscriptionStatus;

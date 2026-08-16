@@ -184,7 +184,6 @@ export function RecentView() {
           resourceId={shareTarget.id}
           resourceName={shareTarget.name}
           onClose={() => setShareTarget(null)}
-          onRevoked={() => setShareTarget(null)}
         />
       )}
     </div>

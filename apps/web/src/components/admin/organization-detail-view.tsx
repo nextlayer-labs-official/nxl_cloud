@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, Mail, UserCheck } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ function formatDateTime(iso: string): string {
   });
 }
 
-type DetailTab = "overview" | "members" | "billing" | "activity";
+type DetailTab = "overview" | "members" | "sharing" | "billing" | "activity";
 
 export function OrganizationDetailView({ orgId }: { orgId: string }) {
   const [org, setOrg] = useState<AdminOrganizationDetail | null>(null);
@@ -34,6 +34,8 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
   const [pending, setPending] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [tab, setTab] = useState<DetailTab>("overview");
+  const [memberActionId, setMemberActionId] = useState<string | null>(null);
+  const [resentId, setResentId] = useState<string | null>(null);
 
   function load() {
     Promise.all([
@@ -65,12 +67,38 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
     }
   }
 
+  async function markVerified(memberId: string) {
+    if (!org) return;
+    setMemberActionId(memberId);
+    try {
+      const updated = await api.post<AdminOrganizationDetail>(
+        `/admin/organizations/${org.id}/members/${memberId}/verify-email`,
+      );
+      setOrg(updated);
+    } finally {
+      setMemberActionId(null);
+    }
+  }
+
+  async function resendVerification(memberId: string) {
+    if (!org) return;
+    setMemberActionId(memberId);
+    try {
+      await api.post(`/admin/organizations/${org.id}/members/${memberId}/resend-verification`);
+      setResentId(memberId);
+      setTimeout(() => setResentId(null), 3000);
+    } finally {
+      setMemberActionId(null);
+    }
+  }
+
   if (error) return <p className="text-error-text text-sm">{error}</p>;
   if (!org) return <div className="text-ink-450 text-sm">Loading…</div>;
 
   const TABS: { key: DetailTab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "members", label: `Members (${org.members.length})` },
+    { key: "sharing", label: `Sharing${org.pendingAccessRequests.length ? ` (${org.pendingAccessRequests.length})` : ""}` },
     { key: "billing", label: "Billing" },
     { key: "activity", label: `Activity (${auditLog.length})` },
   ];
@@ -155,6 +183,14 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
               </span>
             </div>
           </div>
+          <div className="border-border-subtle rounded-xl border p-4">
+            <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Files</div>
+            <div className="text-foreground mt-1 text-[15px] font-semibold">{org.fileCount}</div>
+          </div>
+          <div className="border-border-subtle rounded-xl border p-4">
+            <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Folders</div>
+            <div className="text-foreground mt-1 text-[15px] font-semibold">{org.folderCount}</div>
+          </div>
 
           <div className="border-border-subtle rounded-xl border p-5 sm:col-span-3">
             <div className="mb-4 flex items-center justify-between">
@@ -212,11 +248,94 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
                     <div className="text-ink-450">{member.email}</div>
                   </div>
                 </div>
-                <span className="bg-surface-muted text-ink-600 rounded-full px-2.5 py-1 text-[11px] font-semibold">
-                  {member.role}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                      member.emailVerifiedAt ? "bg-success-bg text-success" : "bg-warn/10 text-warn",
+                    )}
+                  >
+                    {member.emailVerifiedAt ? "Verified" : "Unverified"}
+                  </span>
+                  {!member.emailVerifiedAt && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => resendVerification(member.id)}
+                        disabled={memberActionId === member.id}
+                        className="border-input hover:bg-surface-muted flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60"
+                      >
+                        {memberActionId === member.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Mail className="h-3 w-3" />
+                        )}
+                        {resentId === member.id ? "Sent" : "Resend"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => markVerified(member.id)}
+                        disabled={memberActionId === member.id}
+                        className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-60"
+                      >
+                        Mark as verified
+                      </button>
+                    </>
+                  )}
+                  <span className="bg-surface-muted text-ink-600 rounded-full px-2.5 py-1 text-[11px] font-semibold">
+                    {member.role}
+                  </span>
+                </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "sharing" && (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="border-border-subtle rounded-xl border p-4">
+              <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">
+                Shared by this org
+              </div>
+              <div className="text-foreground mt-1 text-[15px] font-semibold">{org.sharedByOrgCount}</div>
+              <p className="text-ink-450 mt-1 text-[12px]">Items this org has shared with other accounts.</p>
+            </div>
+            <div className="border-border-subtle rounded-xl border p-4">
+              <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">
+                Shared into this org
+              </div>
+              <div className="text-foreground mt-1 text-[15px] font-semibold">{org.sharedIntoOrgCount}</div>
+              <p className="text-ink-450 mt-1 text-[12px]">Items other accounts have shared with members here.</p>
+            </div>
+          </div>
+
+          <div className="border-border-subtle rounded-xl border p-5">
+            <h2 className="text-foreground mb-4 text-[15px] font-semibold">Pending access requests</h2>
+            {org.pendingAccessRequests.length === 0 ? (
+              <div className="text-ink-450 flex items-center gap-2 text-[13px]">
+                <CheckCircle2 className="h-4 w-4" />
+                Nothing pending.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {org.pendingAccessRequests.map((r) => (
+                  <div key={r.id} className="flex items-start gap-2.5 text-[13px]">
+                    <UserCheck className="text-ink-400 mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-foreground font-medium">
+                        <span className="font-semibold">{r.requestedBy.name}</span> asked for access to{" "}
+                        <span className="font-semibold">{r.resourceName}</span>
+                      </div>
+                      <div className="text-ink-450">{r.requestedBy.email}</div>
+                      {r.message && <div className="text-ink-600 mt-1 italic">&quot;{r.message}&quot;</div>}
+                    </div>
+                    <div className="text-ink-450 shrink-0">{formatDateTime(r.createdAt)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

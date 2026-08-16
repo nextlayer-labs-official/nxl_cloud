@@ -12,6 +12,9 @@ interface SelectionBarProps {
   onDelete: () => void;
   infoOpen: boolean;
   onToggleInfo: () => void;
+  /** Move is owner-only. Delete is EDITOR-minimum (matches Dropbox/Drive — an editor on shared content can delete it). A shared Viewer can still download whatever they've selected. */
+  isOwner: boolean;
+  canEdit: boolean;
 }
 
 /** Replaces the breadcrumb/title header row in place while items are selected — matches Drive's contextual toolbar swap rather than adding a separate banner. */
@@ -24,6 +27,8 @@ export function SelectionBar({
   onDelete,
   infoOpen,
   onToggleInfo,
+  isOwner,
+  canEdit,
 }: SelectionBarProps) {
   return (
     <>
@@ -48,24 +53,28 @@ export function SelectionBar({
           <Download className="h-3.5 w-3.5" />
           Download
         </button>
-        <button
-          type="button"
-          onClick={onMove}
-          disabled={busy}
-          className="text-ink-600 hover:bg-surface-muted flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-60"
-        >
-          <FolderInput className="h-3.5 w-3.5" />
-          Move
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={busy}
-          className="text-error-text hover:bg-error-bg flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-60"
-        >
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-          Delete
-        </button>
+        {isOwner && (
+          <button
+            type="button"
+            onClick={onMove}
+            disabled={busy}
+            className="text-ink-600 hover:bg-surface-muted flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-60"
+          >
+            <FolderInput className="h-3.5 w-3.5" />
+            Move
+          </button>
+        )}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={busy}
+            className="text-error-text hover:bg-error-bg flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Delete
+          </button>
+        )}
         <InfoToggleButton active={infoOpen} onClick={onToggleInfo} />
       </div>
     </>

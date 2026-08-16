@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { AuthShell } from "@/components/layout/auth-shell";
 import { RegisterForm } from "@/components/marketing/register-form";
 
@@ -9,7 +10,9 @@ export const metadata: Metadata = {
 export default function RegisterPage() {
   return (
     <AuthShell>
-      <RegisterForm />
+      <Suspense fallback={null}>
+        <RegisterForm />
+      </Suspense>
     </AuthShell>
   );
 }

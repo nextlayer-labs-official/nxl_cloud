@@ -25,11 +25,19 @@ import { api, ApiError } from "@/lib/api-client";
 import { getFileCategory, getFileIcon } from "@/lib/file-icons";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { BreadcrumbEntry, FileItem, FolderItem, SearchResults } from "@/types/portal";
+import type {
+  AccessLevel,
+  AccessStatus,
+  BreadcrumbEntry,
+  FileItem,
+  FolderContents,
+  FolderItem,
+  SearchResults,
+} from "@/types/portal";
 import { useRegisterBrowserActions } from "./browser-actions-context";
 import { FileCard } from "./file-card";
 import { FilePreviewModal } from "./file-preview-modal";
-import { FileRow, type ItemHandle } from "./file-row";
+import { FileRow } from "./file-row";
 import { FilterBar, modifiedFilterCutoff, type ModifiedFilter, type TypeFilter } from "./filter-bar";
 import { FolderChipRow } from "./folder-chip-row";
 import { InfoPanel, InfoToggleButton, type InfoSubject } from "./info-panel";
@@ -37,6 +45,8 @@ import { ItemContextMenu } from "./item-context-menu";
 import { MoveModal } from "./move-modal";
 import { NavIcon } from "./nav-icon";
 import { NewFolderModal } from "./new-folder-modal";
+import { RenameModal } from "./rename-modal";
+import { RequestAccessPanel } from "./request-access-panel";
 import { SelectionBar } from "./selection-bar";
 import { ShareModal } from "./share-modal";
 import { type SelectableItem, useSelection } from "./use-selection";
@@ -108,9 +118,11 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [accessLevel, setAccessLevel] = useState<AccessLevel>("OWNER");
   const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadTask[]>([]);
   const [uploadsCollapsed, setUploadsCollapsed] = useState(false);
@@ -138,13 +150,12 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     { items: SelectableItem[]; label: string; excludeFolderId?: string } | null
   >(null);
   const [cutItems, setCutItems] = useState<SelectableItem[] | null>(null);
+  const [renameTarget, setRenameTarget] = useState<
+    { type: "file" | "folder"; id: string; name: string } | null
+  >(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const dragCounter = useRef(0);
-  const itemRefs = useRef<Map<string, ItemHandle>>(new Map());
-
-  function registerItemRef(id: string, el: ItemHandle | null) {
-    if (el) itemRefs.current.set(id, el);
-    else itemRefs.current.delete(id);
-  }
 
   useEffect(() => {
     const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
@@ -164,7 +175,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
   const openUploadPicker = useCallback(() => fileInputRef.current?.click(), []);
   const startNewFolder = useCallback(() => setCreatingFolder(true), []);
-  useRegisterBrowserActions({ openUploadPicker, startNewFolder });
+  useRegisterBrowserActions({ openUploadPicker, startNewFolder, accessLevel });
 
   const runSearch = useCallback((q: string) => {
     if (!q) return;
@@ -199,18 +210,34 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setAccessStatus(null);
     try {
       const query = folderId ? `?parentId=${folderId}` : "";
       const [contents, crumb] = await Promise.all([
-        api.get<{ folders: FolderItem[]; files: FileItem[] }>(`/folders${query}`),
+        api.get<FolderContents>(`/folders${query}`),
         folderId
           ? api.get<BreadcrumbEntry[]>(`/folders/${folderId}/breadcrumb`)
           : Promise.resolve([]),
       ]);
       setFolders(contents.folders);
       setFiles(contents.files);
+      setAccessLevel(contents.accessLevel);
       setBreadcrumb(crumb);
     } catch (err) {
+      // A failed load on a specific folder might just mean "exists but not
+      // shared with you" — check access-status before giving up, so we can
+      // offer Request access instead of a dead end (mirrors file-view.tsx).
+      if (folderId) {
+        try {
+          const status = await api.get<AccessStatus>(`/folders/${folderId}/access-status`);
+          if (!status.hasAccess) {
+            setAccessStatus(status);
+            return;
+          }
+        } catch {
+          // fall through to the generic error below
+        }
+      }
       setError(err instanceof ApiError ? err.message : "Couldn't load this folder.");
     } finally {
       setLoading(false);
@@ -294,6 +321,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
   function handleDragEnter(e: React.DragEvent) {
     e.preventDefault();
+    if (accessLevel === "VIEWER") return;
     if (e.dataTransfer.types.includes("Files")) {
       dragCounter.current += 1;
       setDragActive(true);
@@ -313,6 +341,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     e.preventDefault();
     dragCounter.current = 0;
     setDragActive(false);
+    if (accessLevel === "VIEWER") return;
     Array.from(e.dataTransfer.files ?? []).forEach((file) => uploadFile(file));
   }
 
@@ -368,8 +397,16 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     }
   }
 
-  async function handleRename(type: "file" | "folder", id: string, name: string) {
-    setActionError(null);
+  function openRenameModal(type: "file" | "folder", id: string, name: string) {
+    setRenameError(null);
+    setRenameTarget({ type, id, name });
+  }
+
+  async function handleRenameConfirm(name: string) {
+    if (!renameTarget) return;
+    const { type, id } = renameTarget;
+    setRenaming(true);
+    setRenameError(null);
     try {
       if (type === "file") {
         const updated = await api.patch<{ name: string }>(`/files/${id}`, { name });
@@ -381,8 +418,11 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
       }
       setShareTarget((prev) => (prev && prev.id === id ? { ...prev, name } : prev));
       if (isSearching) runSearch(searchQuery.trim());
+      setRenameTarget(null);
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Couldn't rename.");
+      setRenameError(err instanceof ApiError ? err.message : "Couldn't rename.");
+    } finally {
+      setRenaming(false);
     }
   }
 
@@ -522,8 +562,9 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
   function handleRenameShortcut() {
     if (selection.count !== 1) return;
-    const [[id]] = selection.selected.entries();
-    itemRefs.current.get(id)?.startRename();
+    const [[id, type]] = selection.selected.entries();
+    const item = type === "folder" ? folders.find((f) => f.id === id) : files.find((f) => f.id === id);
+    if (item) openRenameModal(type, id, item.name);
   }
 
   function handlePreviewShortcut() {
@@ -535,6 +576,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   }
 
   const isEmpty = !loading && folders.length === 0 && files.length === 0;
+  const isOwner = accessLevel === "OWNER";
+  const canEdit = accessLevel !== "VIEWER";
   const hasActiveFilters = typeFilter !== "all" || modifiedFilter !== "any";
   const pageTitle = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "My Files";
 
@@ -615,7 +658,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
   }, [isSearching, selection.selected, selection.count, folders, files, breadcrumb, pageTitle]);
 
   useKeyboardShortcuts({
-    enabled: !isSearching && !creatingFolder && !shareTarget && !previewFile && !moveTarget && !loading,
+    enabled:
+      !isSearching && !creatingFolder && !shareTarget && !previewFile && !moveTarget && !renameTarget && !loading,
     onDelete: handleBulkDelete,
     onSelectAll: () => selection.selectAll(allItems),
     onEscape: () => selection.clear(),
@@ -636,6 +680,17 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     onPaste: handlePaste,
   });
 
+  if (accessStatus && !accessStatus.hasAccess) {
+    return (
+      <RequestAccessPanel
+        resourceType="folder"
+        resourceId={folderId!}
+        resourceName={accessStatus.name}
+        initialRequestStatus={accessStatus.requestStatus}
+      />
+    );
+  }
+
   return (
     <div
       onDragEnter={handleDragEnter}
@@ -655,6 +710,8 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             onDelete={handleBulkDelete}
             infoOpen={infoPanelOpen}
             onToggleInfo={() => setInfoPanelOpen((v) => !v)}
+            isOwner={isOwner}
+            canEdit={canEdit}
           />
         ) : (
           <>
@@ -927,8 +984,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
       ) : isEmpty ? (
         <ItemContextMenu
           actions={[
-            { label: "New folder", icon: FolderPlus, onSelect: () => setCreatingFolder(true) },
-            { label: "Upload file", icon: Upload, onSelect: () => fileInputRef.current?.click() },
+            ...(canEdit ? [{ label: "New folder", icon: FolderPlus, onSelect: () => setCreatingFolder(true) }] : []),
+            ...(canEdit
+              ? [{ label: "Upload file", icon: Upload, onSelect: () => fileInputRef.current?.click() }]
+              : []),
           ]}
         >
           <div className="border-border-subtle flex flex-col items-center rounded-xl border border-dashed py-20 text-center">
@@ -936,16 +995,20 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
               <Inbox className="text-ink-400 h-6 w-6" />
             </div>
             <p className="text-foreground text-[15px] font-semibold">This folder is empty</p>
-            <p className="text-ink-450 mt-1 text-sm">
-              Drag and drop files here, or use the buttons above.
-            </p>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 mt-5 cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
-            >
-              Upload a file
-            </button>
+            {canEdit && (
+              <>
+                <p className="text-ink-450 mt-1 text-sm">
+                  Drag and drop files here, or use the buttons above.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 mt-5 cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold"
+                >
+                  Upload a file
+                </button>
+              </>
+            )}
           </div>
         </ItemContextMenu>
       ) : isFilteredEmpty ? (
@@ -969,9 +1032,11 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
       ) : (
         <ItemContextMenu
           actions={[
-            { label: "New folder", icon: FolderPlus, onSelect: () => setCreatingFolder(true) },
-            { label: "Upload file", icon: Upload, onSelect: () => fileInputRef.current?.click() },
-            ...(cutItems && cutItems.length > 0
+            ...(canEdit ? [{ label: "New folder", icon: FolderPlus, onSelect: () => setCreatingFolder(true) }] : []),
+            ...(canEdit
+              ? [{ label: "Upload file", icon: Upload, onSelect: () => fileInputRef.current?.click() }]
+              : []),
+            ...(isOwner && cutItems && cutItems.length > 0
               ? [
                   {
                     label: `Paste ${cutItems.length} item${cutItems.length === 1 ? "" : "s"}`,
@@ -987,7 +1052,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             folders={sortedFolders}
             isSelected={selection.isSelected}
             isFocused={(id) => focusedIndex !== null && allItems[focusedIndex]?.id === id}
-            registerRef={registerItemRef}
+            accessLevel={accessLevel}
             onSelectAttempt={(folder, i) => (e) =>
               selection.handleItemClick({ id: folder.id, type: "folder" }, i, allItems, e)
             }
@@ -996,7 +1061,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
             onMove={(folder) => openMoveModal([{ id: folder.id, type: "folder" }], folder.name, folder.id)}
             onToggleStar={(folder) => handleToggleStar("folder", folder.id, folder.isStarred)}
             onDelete={(folder) => handleDeleteFolder(folder)}
-            onRename={(folder, name) => handleRename("folder", folder.id, name)}
+            onRename={(folder) => openRenameModal("folder", folder.id, folder.name)}
           />
 
           {sortedFiles.length === 0 ? null : viewMode === "grid" ? (
@@ -1006,10 +1071,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                 return (
                   <FileCard
                     key={file.id}
-                    ref={(el) => registerItemRef(file.id, el)}
                     file={file}
                     selected={selection.isSelected(file.id)}
                     focused={focusedIndex === index}
+                    accessLevel={accessLevel}
                     onSelectAttempt={(e) =>
                       selection.handleItemClick({ id: file.id, type: "file" }, index, allItems, e)
                     }
@@ -1020,7 +1085,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                     onMove={() => openMoveModal([{ id: file.id, type: "file" }], file.name)}
                     onToggleStar={() => handleToggleStar("file", file.id, file.isStarred)}
                     onDelete={() => handleDeleteFile(file)}
-                    onRename={(name) => handleRename("file", file.id, name)}
+                    onRename={() => openRenameModal("file", file.id, file.name)}
                   />
                 );
               })}
@@ -1084,10 +1149,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                     return (
                       <FileRow
                         key={file.id}
-                        ref={(el) => registerItemRef(file.id, el)}
                         file={file}
                         selected={selection.isSelected(file.id)}
                         focused={focusedIndex === index}
+                        accessLevel={accessLevel}
                         onSelectAttempt={(e) =>
                           selection.handleItemClick({ id: file.id, type: "file" }, index, allItems, e)
                         }
@@ -1098,7 +1163,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                         onMove={() => openMoveModal([{ id: file.id, type: "file" }], file.name)}
                         onToggleStar={() => handleToggleStar("file", file.id, file.isStarred)}
                         onDelete={() => handleDeleteFile(file)}
-                        onRename={(name) => handleRename("file", file.id, name)}
+                        onRename={() => openRenameModal("file", file.id, file.name)}
                       />
                     );
                   })}
@@ -1213,17 +1278,22 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
         />
       )}
 
+      {renameTarget && (
+        <RenameModal
+          currentName={renameTarget.name}
+          onCancel={() => setRenameTarget(null)}
+          onRename={handleRenameConfirm}
+          renaming={renaming}
+          error={renameError}
+        />
+      )}
+
       {shareTarget && (
         <ShareModal
           resourceType={shareTarget.type}
           resourceId={shareTarget.id}
           resourceName={shareTarget.name}
           onClose={() => {
-            setShareTarget(null);
-            load();
-            if (isSearching) runSearch(searchQuery.trim());
-          }}
-          onRevoked={() => {
             setShareTarget(null);
             load();
             if (isSearching) runSearch(searchQuery.trim());

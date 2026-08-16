@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AuthShell } from "@/components/layout/auth-shell";
-import { LoginForm } from "@/components/marketing/login-form";
+import { ResetPasswordForm } from "@/components/marketing/reset-password-form";
 
 export const metadata: Metadata = {
-  title: "Log in",
+  title: "Reset password",
 };
 
-export default function LoginPage() {
+export default function ResetPasswordPage() {
   return (
     <AuthShell>
       <Suspense fallback={null}>
-        <LoginForm />
+        <ResetPasswordForm />
       </Suspense>
     </AuthShell>
   );

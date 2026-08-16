@@ -45,6 +45,14 @@ export function PortalSidebar() {
   const percentUsed =
     usage?.limitBytes ? Math.min(100, (usage.usedBytes / usage.limitBytes) * 100) : null;
 
+  // A folder page's own accessLevel (registered by FileBrowser) decides whether
+  // it's really "My Files" or a shared folder someone else owns — otherwise
+  // browsing into a shared folder would wrongly light up "My Files".
+  const isSharedFolderPage =
+    pathname.startsWith("/portal/folder") && browserActions !== null && browserActions.accessLevel !== "OWNER";
+  const canEditHere = browserActions !== null && browserActions.accessLevel !== "VIEWER";
+  const canUploadHere = canEditHere;
+
   return (
     <aside className="border-border-subtle bg-surface-muted-2 flex h-full w-[264px] shrink-0 flex-col overflow-y-auto border-r px-4 py-6">
       <div className="border-border-subtle bg-background rounded-xl border px-3 py-2.5">
@@ -60,7 +68,7 @@ export function PortalSidebar() {
         </div>
       </div>
 
-      {browserActions && (
+      {browserActions && (canEditHere || canUploadHere) && (
         <div ref={newMenuRef} className="relative mt-4">
           <button
             type="button"
@@ -73,28 +81,32 @@ export function PortalSidebar() {
           </button>
           {newMenuOpen && (
             <div className="border-border-subtle bg-background absolute top-[calc(100%+6px)] left-0 z-10 min-w-[200px] overflow-hidden rounded-xl border shadow-lg">
-              <button
-                type="button"
-                onClick={() => {
-                  browserActions.startNewFolder();
-                  setNewMenuOpen(false);
-                }}
-                className="text-foreground hover:bg-surface-muted flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium"
-              >
-                <FolderPlus className="h-4 w-4" />
-                New folder
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  browserActions.openUploadPicker();
-                  setNewMenuOpen(false);
-                }}
-                className="text-foreground hover:bg-surface-muted flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium"
-              >
-                <Upload className="h-4 w-4" />
-                Upload file
-              </button>
+              {canEditHere && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    browserActions.startNewFolder();
+                    setNewMenuOpen(false);
+                  }}
+                  className="text-foreground hover:bg-surface-muted flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  New folder
+                </button>
+              )}
+              {canUploadHere && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    browserActions.openUploadPicker();
+                    setNewMenuOpen(false);
+                  }}
+                  className="text-foreground hover:bg-surface-muted flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium"
+                >
+                  <Upload className="h-4 w-4" />
+                  Upload file
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -105,7 +117,7 @@ export function PortalSidebar() {
           href="/portal"
           className={cn(
             "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold",
-            pathname === "/portal" || pathname.startsWith("/portal/folder")
+            (pathname === "/portal" || pathname.startsWith("/portal/folder")) && !isSharedFolderPage
               ? "bg-accent text-accent-foreground"
               : "text-ink-600 hover:bg-background",
           )}
@@ -117,7 +129,7 @@ export function PortalSidebar() {
           href="/portal/shared"
           className={cn(
             "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold",
-            pathname === "/portal/shared"
+            pathname === "/portal/shared" || isSharedFolderPage
               ? "bg-accent text-accent-foreground"
               : "text-ink-600 hover:bg-background",
           )}

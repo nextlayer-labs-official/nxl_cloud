@@ -440,7 +440,7 @@ function DeleteAccountModal({
 }
 
 export function SettingsView() {
-  const { user, refresh } = usePortal();
+  const { user, organization, refresh } = usePortal();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -450,7 +450,7 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   const [profileMessage, setProfileMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [editingField, setEditingField] = useState<"name" | "email" | null>(null);
+  const [editingField, setEditingField] = useState<"name" | "email" | "orgName" | null>(null);
 
   const [passwordMessage, setPasswordMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -588,6 +588,12 @@ export function SettingsView() {
     setProfileMessage({ type: "success", text: field === "name" ? "Name updated." : "Email updated." });
   }
 
+  async function handleSaveOrgName(value: string) {
+    await api.patch("/organizations", { name: value });
+    await refresh();
+    setProfileMessage({ type: "success", text: "Workspace name updated." });
+  }
+
   async function handleChangePassword(currentPassword: string, newPassword: string) {
     await api.post("/auth/change-password", { currentPassword, newPassword });
     setPasswordMessage({ type: "success", text: "Password updated." });
@@ -645,6 +651,19 @@ export function SettingsView() {
               value={user.email}
               actionLabel="Edit"
               onAction={() => setEditingField("email")}
+            />
+          </div>
+        </SectionCard>
+      )}
+
+      {activeTab === "profile" && (
+        <SectionCard title="Workspace" description="The name shown across your files and in the sidebar.">
+          <div className="border-border-subtle divide-border-subtle divide-y rounded-xl border">
+            <SettingsRow
+              label="Workspace name"
+              value={organization.name}
+              actionLabel="Edit"
+              onAction={() => setEditingField("orgName")}
             />
           </div>
         </SectionCard>
@@ -982,6 +1001,15 @@ export function SettingsView() {
           type="email"
           onClose={() => setEditingField(null)}
           onSave={(value) => handleSaveProfileField("email", value)}
+        />
+      )}
+
+      {editingField === "orgName" && (
+        <EditFieldModal
+          label="Workspace name"
+          value={organization.name}
+          onClose={() => setEditingField(null)}
+          onSave={handleSaveOrgName}
         />
       )}
 

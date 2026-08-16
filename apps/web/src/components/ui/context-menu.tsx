@@ -14,6 +14,7 @@ function ContextMenuTrigger(props: React.ComponentProps<typeof ContextMenuPrimit
 
 function ContextMenuContent({
   className,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
@@ -24,6 +25,15 @@ function ContextMenuContent({
           "border-border-subtle bg-background z-50 min-w-[180px] overflow-hidden rounded-xl border p-1 shadow-lg",
           className,
         )}
+        // Radix's default close behavior returns focus to the trigger (the
+        // file/folder row) right as it unmounts. That fires a blur on any
+        // input an action just opened in its place — e.g. Rename's inline
+        // edit box — whose onBlur treats the blur as "done editing" and
+        // immediately closes it again, so it never visibly appears.
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          onCloseAutoFocus?.(e);
+        }}
         {...props}
       />
     </ContextMenuPrimitive.Portal>

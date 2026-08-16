@@ -2,9 +2,10 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormField } from "@/components/common/form-field";
 import { API_URL } from "@/constants/site";
+import { safeRedirect } from "@/lib/safe-redirect";
 
 const STRENGTH_COLORS = ["bg-ink-400", "bg-destructive", "bg-warn", "bg-success"];
 
@@ -18,8 +19,9 @@ function computeStrength(value: string) {
 
 export function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [company, setCompany] = useState("");
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -54,7 +56,7 @@ export function RegisterForm() {
         return;
       }
 
-      router.push("/portal");
+      router.push(safeRedirect(searchParams.get("redirect")));
     } catch {
       setError("Couldn't reach the server. Please try again.");
       setSubmitting(false);
@@ -146,7 +148,16 @@ export function RegisterForm() {
         Your files stay private, encrypted, and yours.
       </div>
       <div className="mt-5 text-center text-sm">
-        Already have an account? <Link href="/login">Log in</Link>
+        Already have an account?{" "}
+        <Link
+          href={
+            searchParams.get("redirect")
+              ? `/login?redirect=${encodeURIComponent(searchParams.get("redirect")!)}`
+              : "/login"
+          }
+        >
+          Log in
+        </Link>
       </div>
     </>
   );

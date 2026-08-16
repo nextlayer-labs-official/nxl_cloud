@@ -8,6 +8,7 @@ import { BrowserActionsProvider } from "./browser-actions-context";
 import { PortalContext, type PortalContextValue } from "./portal-context";
 import { PortalSidebar } from "./portal-sidebar";
 import { PortalTopBar } from "./portal-topbar";
+import { VerificationBanner } from "./verification-banner";
 
 type LoadState =
   | { status: "loading" }
@@ -29,7 +30,13 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     fetchMe().catch(() => {
-      if (!cancelled) router.replace("/login");
+      // Preserves the destination (e.g. a share-email link straight to a
+      // folder) through the login round-trip instead of dumping the user
+      // back at the generic /portal root once they sign in.
+      if (!cancelled) {
+        const dest = window.location.pathname + window.location.search;
+        router.replace(`/login?redirect=${encodeURIComponent(dest)}`);
+      }
     });
     return () => {
       cancelled = true;
@@ -60,6 +67,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       <BrowserActionsProvider>
         <div className="bg-background text-foreground flex h-screen w-full flex-col">
           <PortalTopBar />
+          <VerificationBanner />
           <div className="flex min-h-0 flex-1">
             <PortalSidebar />
             <main className="min-w-0 flex-1 overflow-y-auto px-12 py-10">{children}</main>

@@ -1,20 +1,19 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { Download, FolderInput, Link2, Pencil, Share2, Star, Trash2 } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { FileItem } from "@/types/portal";
+import type { AccessLevel, FileItem } from "@/types/portal";
 import { FileThumbnail } from "./file-thumbnail";
 import { ItemCheckbox } from "./item-checkbox";
 import { ItemContextMenu } from "./item-context-menu";
-import type { ItemHandle } from "./file-row";
-import { useClickOrDoubleClick } from "./use-click-or-double-click";
 
 interface FileCardProps {
   file: FileItem;
   selected: boolean;
   focused?: boolean;
+  /** Defaults to full owner access — a Viewer/Editor browsing a shared folder passes their actual resolved level. */
+  accessLevel?: AccessLevel;
   onSelectAttempt: (e: React.MouseEvent) => boolean;
   onToggleCheckbox: () => void;
   onOpen: () => void;
@@ -23,51 +22,32 @@ interface FileCardProps {
   onMove: () => void;
   onToggleStar: () => void;
   onDelete: () => void;
-  onRename: (name: string) => void;
+  onRename: () => void;
 }
 
 /** Grid-mode card for a file, with a real thumbnail for images. */
-export const FileCard = forwardRef<ItemHandle, FileCardProps>(function FileCard(
-  {
-    file,
-    selected,
-    focused,
-    onSelectAttempt,
-    onToggleCheckbox,
-    onOpen,
-    onDownload,
-    onShare,
-    onMove,
-    onToggleStar,
-    onDelete,
-    onRename,
-  },
-  ref,
-) {
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(file.name);
-  const inputRef = useRef<HTMLInputElement>(null);
+export function FileCard({
+  file,
+  selected,
+  focused,
+  accessLevel = "OWNER",
+  onSelectAttempt,
+  onToggleCheckbox,
+  onOpen,
+  onDownload,
+  onShare,
+  onMove,
+  onToggleStar,
+  onDelete,
+  onRename,
+}: FileCardProps) {
+  const isOwner = accessLevel === "OWNER";
+  const canEdit = accessLevel !== "VIEWER";
 
-  function startRename() {
-    setDraft(file.name);
-    setRenaming(true);
-    requestAnimationFrame(() => inputRef.current?.select());
-  }
-
-  useImperativeHandle(ref, () => ({ startRename }));
-
-  function commitRename() {
-    setRenaming(false);
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== file.name) onRename(trimmed);
-  }
-
-  function openOrSelect(e: React.MouseEvent) {
+  function handleClick(e: React.MouseEvent) {
     const handled = onSelectAttempt(e);
     if (!handled) onOpen();
   }
-
-  const handleClick = useClickOrDoubleClick(openOrSelect, startRename);
 
   return (
     // Boundary between this item's own trigger and any ancestor canvas-level
@@ -77,11 +57,13 @@ export const FileCard = forwardRef<ItemHandle, FileCardProps>(function FileCard(
       <ItemContextMenu
         actions={[
           { label: "Download", icon: Download, onSelect: onDownload },
-          { label: "Rename", icon: Pencil, onSelect: startRename },
-          { label: "Share", icon: Share2, onSelect: onShare },
-          { label: "Move to...", icon: FolderInput, onSelect: onMove },
+          ...(canEdit ? [{ label: "Rename", icon: Pencil, onSelect: onRename }] : []),
+          ...(isOwner ? [{ label: "Share", icon: Share2, onSelect: onShare }] : []),
+          ...(isOwner ? [{ label: "Move to...", icon: FolderInput, onSelect: onMove }] : []),
           { label: file.isStarred ? "Remove from Starred" : "Add to Starred", icon: Star, onSelect: onToggleStar },
-          { label: "Delete", icon: Trash2, onSelect: onDelete, destructive: true, separatorBefore: true },
+          ...(canEdit
+            ? [{ label: "Delete", icon: Trash2, onSelect: onDelete, destructive: true, separatorBefore: true }]
+            : []),
         ]}
       >
         <div className={cn("group relative", selected && "z-[1]")}>
@@ -103,27 +85,7 @@ export const FileCard = forwardRef<ItemHandle, FileCardProps>(function FileCard(
               />
             </div>
             <div className="flex min-w-0 items-center gap-1.5">
-              {renaming ? (
-                <input
-                  ref={inputRef}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitRename();
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      setRenaming(false);
-                    }
-                  }}
-                  className="border-input bg-background text-foreground min-w-0 flex-1 rounded-md border px-2 py-1 text-[13px] font-medium outline-none"
-                />
-              ) : (
-                <span className="text-foreground truncate text-[13px] font-medium">{file.name}</span>
-              )}
+              <span className="text-foreground truncate text-[13px] font-medium">{file.name}</span>
               {file.isShared && <Link2 className="text-ink-400 h-3.5 w-3.5 shrink-0" aria-label="Shared" />}
             </div>
             <span className="text-ink-450 text-[12px]">{formatBytes(file.sizeBytes)}</span>
@@ -140,31 +102,35 @@ export const FileCard = forwardRef<ItemHandle, FileCardProps>(function FileCard(
             >
               <Download className="h-3.5 w-3.5" />
             </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onShare();
-              }}
-              aria-label={`Share ${file.name}`}
-              className="text-ink-400 hover:text-primary bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
-            >
-              <Share2 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              aria-label={`Delete ${file.name}`}
-              className="text-ink-400 hover:text-error-text bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShare();
+                }}
+                aria-label={`Share ${file.name}`}
+                className="text-ink-400 hover:text-primary bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                aria-label={`Delete ${file.name}`}
+                className="text-ink-400 hover:text-error-text bg-background border-border-subtle cursor-pointer rounded-full border p-1 shadow-sm"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </ItemContextMenu>
     </div>
   );
-});
+}

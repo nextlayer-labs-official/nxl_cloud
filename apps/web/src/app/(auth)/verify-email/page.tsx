@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AuthShell } from "@/components/layout/auth-shell";
-import { LoginForm } from "@/components/marketing/login-form";
+import { VerifyEmailView } from "@/components/marketing/verify-email-view";
 
 export const metadata: Metadata = {
-  title: "Log in",
+  title: "Verify your email",
 };
 
-export default function LoginPage() {
+export default function VerifyEmailPage() {
   return (
     <AuthShell>
       <Suspense fallback={null}>
-        <LoginForm />
+        <VerifyEmailView />
       </Suspense>
     </AuthShell>
   );

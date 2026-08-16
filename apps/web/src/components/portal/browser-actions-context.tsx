@@ -1,10 +1,13 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import type { AccessLevel } from "@/types/portal";
 
 export interface BrowserActions {
   openUploadPicker: () => void;
   startNewFolder: () => void;
+  /** The current folder's resolved access — lets the sidebar's global "+ New" button and nav highlighting react to browsing a shared (non-owned) folder. */
+  accessLevel: AccessLevel;
 }
 
 interface BrowserActionsContextValue {
@@ -35,9 +38,9 @@ export function useRegisterBrowserActions(actions: BrowserActions) {
   // value object (which changes identity every time actions are registered) —
   // otherwise this effect would re-fire and re-register in a loop.
   const registerActions = useContext(BrowserActionsContext)?.registerActions;
-  const { openUploadPicker, startNewFolder } = actions;
+  const { openUploadPicker, startNewFolder, accessLevel } = actions;
   useEffect(() => {
-    registerActions?.({ openUploadPicker, startNewFolder });
+    registerActions?.({ openUploadPicker, startNewFolder, accessLevel });
     return () => registerActions?.(null);
-  }, [registerActions, openUploadPicker, startNewFolder]);
+  }, [registerActions, openUploadPicker, startNewFolder, accessLevel]);
 }

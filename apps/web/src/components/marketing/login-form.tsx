@@ -2,12 +2,14 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormField } from "@/components/common/form-field";
 import { API_URL } from "@/constants/site";
+import { safeRedirect } from "@/lib/safe-redirect";
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +34,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/portal");
+      router.push(safeRedirect(searchParams.get("redirect")));
     } catch {
       setError("Couldn't reach the server. Please try again.");
       setSubmitting(false);
@@ -66,7 +68,7 @@ export function LoginForm() {
             <label htmlFor="l-pass" className="text-ink-700 text-[13px] font-semibold">
               Password
             </label>
-            <Link href="#" className="text-[13px]">
+            <Link href="/forgot-password" className="text-[13px]">
               Forgot password?
             </Link>
           </div>
@@ -94,7 +96,8 @@ export function LoginForm() {
         Your files stay private, encrypted, and yours.
       </div>
       <div className="mt-5 text-center text-sm">
-        Don&apos;t have an account? <Link href="/register">Sign up</Link>
+        Don&apos;t have an account?{" "}
+        <Link href={`/register${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}>Sign up</Link>
       </div>
     </>
   );
