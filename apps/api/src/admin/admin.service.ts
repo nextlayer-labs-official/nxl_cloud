@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { hashPassword } from "../auth/password.util";
+import { sendVerificationEmailFor } from "../auth/verification-token.util";
+import { EmailService } from "../email/email.service";
 import { uniqueOrgSlug } from "../organizations/slug.util";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import type { CreatePlanDto } from "./dto/create-plan.dto";
@@ -15,6 +17,8 @@ const MONTHLY_PERIOD_MS = 30 * DAY_MS;
 
 @Injectable()
 export class AdminService {
+  constructor(private readonly email: EmailService) {}
+
   async createCustomer(dto: CreateCustomerDto) {
     const email = dto.email.toLowerCase().trim();
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -105,6 +109,15 @@ export class AdminService {
     return organization;
   }
 
+  /** This org's own (non-deleted) file/folder ids — the basis for storage usage, item counts, and telling "shared by us" apart from "shared into us" below. */
+  private async getOrgResourceIds(organizationId: string) {
+    const [files, folders] = await Promise.all([
+      prisma.file.findMany({ where: { organizationId, deletedAt: null }, select: { id: true } }),
+      prisma.folder.findMany({ where: { organizationId, deletedAt: null }, select: { id: true } }),
+    ]);
+    return { fileIds: files.map((f) => f.id), folderIds: folders.map((f) => f.id) };
+  }
+
   async getOrganization(id: string) {
     const [organization, storageUsage] = await Promise.all([
       prisma.organization.findUnique({
@@ -121,6 +134,53 @@ export class AdminService {
     ]);
     if (!organization) throw new NotFoundException("Organization not found.");
 
+    const { fileIds, folderIds } = await this.getOrgResourceIds(id);
+    const memberIds = organization.memberships.map((m) => m.userId);
+
+    const [grantsOnOwnResources, grantsToOwnMembers, pendingRequests] = await Promise.all([
+      // Permission grants other people hold on something this org owns — "shared by us".
+      prisma.permission.findMany({
+        where: {
+          OR: [
+            { resourceType: "FILE", resourceId: { in: fileIds } },
+            { resourceType: "FOLDER", resourceId: { in: folderIds } },
+          ],
+        },
+        select: { resourceType: true, resourceId: true },
+      }),
+      // Permission grants held by this org's own members — some point at resources
+      // this org owns (self-shares between teammates), filtered out below to leave
+      // only genuinely external resources — "shared into us".
+      prisma.permission.findMany({
+        where: { granteeType: "USER", granteeId: { in: memberIds } },
+        select: { resourceType: true, resourceId: true },
+      }),
+      prisma.accessRequest.findMany({
+        where: {
+          status: "PENDING",
+          OR: [
+            { resourceType: "FILE", resourceId: { in: fileIds } },
+            { resourceType: "FOLDER", resourceId: { in: folderIds } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+        include: { requestedBy: { select: { id: true, name: true, email: true } } },
+      }),
+    ]);
+
+    const ownFileIdSet = new Set(fileIds);
+    const ownFolderIdSet = new Set(folderIds);
+    const externalGrants = grantsToOwnMembers.filter((g) =>
+      g.resourceType === "FILE" ? !ownFileIdSet.has(g.resourceId) : !ownFolderIdSet.has(g.resourceId),
+    );
+
+    const sharedByOrgCount = new Set(grantsOnOwnResources.map((g) => `${g.resourceType}:${g.resourceId}`)).size;
+    const sharedIntoOrgCount = new Set(externalGrants.map((g) => `${g.resourceType}:${g.resourceId}`)).size;
+
+    const requestResourceNames = await this.resolveResourceNames(
+      pendingRequests.map((r) => ({ resourceType: r.resourceType, resourceId: r.resourceId })),
+    );
+
     return {
       id: organization.id,
       name: organization.name,
@@ -128,12 +188,25 @@ export class AdminService {
       createdAt: organization.createdAt,
       suspendedAt: organization.suspendedAt,
       storageUsedBytes: storageUsage._sum.sizeBytes ?? 0,
+      fileCount: fileIds.length,
+      folderCount: folderIds.length,
+      sharedByOrgCount,
+      sharedIntoOrgCount,
       members: organization.memberships.map((m) => ({
         id: m.user.id,
         name: m.user.name,
         email: m.user.email,
         role: m.role,
         joinedAt: m.createdAt,
+        emailVerifiedAt: m.user.emailVerifiedAt,
+      })),
+      pendingAccessRequests: pendingRequests.map((r) => ({
+        id: r.id,
+        resourceType: r.resourceType,
+        resourceName: requestResourceNames.get(`${r.resourceType}:${r.resourceId}`) ?? "(deleted)",
+        message: r.message,
+        createdAt: r.createdAt,
+        requestedBy: r.requestedBy,
       })),
       subscription: organization.subscription
         ? {
@@ -149,6 +222,23 @@ export class AdminService {
           }
         : null,
     };
+  }
+
+  private async resolveResourceNames(resources: { resourceType: string; resourceId: string }[]) {
+    const fileIds = resources.filter((r) => r.resourceType === "FILE").map((r) => r.resourceId);
+    const folderIds = resources.filter((r) => r.resourceType === "FOLDER").map((r) => r.resourceId);
+    const [files, folders] = await Promise.all([
+      fileIds.length
+        ? prisma.file.findMany({ where: { id: { in: fileIds } }, select: { id: true, name: true } })
+        : ([] as { id: string; name: string }[]),
+      folderIds.length
+        ? prisma.folder.findMany({ where: { id: { in: folderIds } }, select: { id: true, name: true } })
+        : ([] as { id: string; name: string }[]),
+    ]);
+    const map = new Map<string, string>();
+    files.forEach((f) => map.set(`FILE:${f.id}`, f.name));
+    folders.forEach((f) => map.set(`FOLDER:${f.id}`, f.name));
+    return map;
   }
 
   async getOrganizationTransactions(id: string) {
@@ -168,6 +258,38 @@ export class AdminService {
   async reactivateOrganization(id: string) {
     await this.requireOrganization(id);
     return prisma.organization.update({ where: { id }, data: { suspendedAt: null } });
+  }
+
+  /** Scopes the target user to this specific org, so an admin acting on one org's detail page can't accidentally touch a member of a different org via a mismatched id. */
+  private async requireMember(organizationId: string, userId: string) {
+    const membership = await prisma.membership.findUnique({
+      where: { userId_organizationId: { userId, organizationId } },
+      include: { user: true },
+    });
+    if (!membership) throw new NotFoundException("Member not found in this organization.");
+    return membership.user;
+  }
+
+  /**
+   * Support-side bypass of the normal email-link flow — for when a member's
+   * verification email isn't arriving (spam filtering, a typo'd inbox they've
+   * since proven ownership of some other way, etc). Sets emailVerifiedAt
+   * directly, which is exactly what clicking the real link would have done.
+   */
+  async markMemberVerified(organizationId: string, userId: string) {
+    const user = await this.requireMember(organizationId, userId);
+    if (!user.emailVerifiedAt) {
+      await prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+    }
+    return this.getOrganization(organizationId);
+  }
+
+  async resendMemberVerification(organizationId: string, userId: string) {
+    const user = await this.requireMember(organizationId, userId);
+    if (!user.emailVerifiedAt) {
+      await sendVerificationEmailFor(this.email, user);
+    }
+    return { success: true };
   }
 
   async updateSubscription(id: string, dto: UpdateSubscriptionDto) {

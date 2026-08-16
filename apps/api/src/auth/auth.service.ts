@@ -2,29 +2,50 @@ import { randomBytes } from "node:crypto";
 import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import type { Request } from "express";
+import { EmailService } from "../email/email.service";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { uniqueOrgSlug } from "../organizations/slug.util";
+import { claimPendingGrants } from "../permissions/permission.util";
 import { StorageService } from "../storage/storage.service";
 import type { ChangePasswordDto } from "./dto/change-password.dto";
 import type { DeleteAccountDto } from "./dto/delete-account.dto";
+import type { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import type { LoginDto } from "./dto/login.dto";
 import type { RegisterDto } from "./dto/register.dto";
+import type { ResetPasswordDto } from "./dto/reset-password.dto";
 import type { UpdateProfileDto } from "./dto/update-profile.dto";
+import type { VerifyEmailDto } from "./dto/verify-email.dto";
 import { hashPassword, verifyPassword } from "./password.util";
+import { createVerificationToken, sendVerificationEmailFor } from "./verification-token.util";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 // A plan with trials disabled starts subscriptions ACTIVE for a normal
 // monthly period instead — matches billing.service.ts's MONTHLY period.
 const MONTHLY_PERIOD_MS = 30 * DAY_MS;
+// Shorter than verification — a password-reset token grants account access.
+const PASSWORD_RESET_TTL_MS = HOUR_MS;
 
 function getUserAgent(req: Request): string | undefined {
   const ua = req.headers["user-agent"];
   return typeof ua === "string" ? ua : undefined;
 }
 
-function toSafeUser(user: { id: string; email: string; name: string; avatarUrl: string | null }) {
-  return { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl };
+function toSafeUser(user: {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+  emailVerifiedAt: Date | null;
+}) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    avatarUrl: user.avatarUrl,
+    emailVerifiedAt: user.emailVerifiedAt,
+  };
 }
 
 @Injectable()
@@ -32,7 +53,12 @@ export class AuthService {
   constructor(
     private readonly organizations: OrganizationsService,
     private readonly storage: StorageService,
+    private readonly email: EmailService,
   ) {}
+
+  private webOrigin(): string {
+    return process.env.WEB_ORIGIN ?? "http://localhost:3000";
+  }
 
   async register(dto: RegisterDto, req: Request) {
     const email = dto.email.toLowerCase().trim();
@@ -91,6 +117,12 @@ export class AuthService {
       });
       return { user, sessionToken };
     });
+
+    // Adopts any Dropbox/Drive-style pending invites addressed to this email
+    // into real grants now that the account exists — see sharePermission's
+    // pending-invite path in files/folders.service.ts.
+    await claimPendingGrants(result.user.id, email);
+    await sendVerificationEmailFor(this.email, result.user);
 
     return { user: toSafeUser(result.user), sessionToken: result.sessionToken };
   }
@@ -178,5 +210,58 @@ export class AuthService {
     await prisma.organization.delete({ where: { id: membership.organizationId } });
     await Promise.all(files.map((f) => this.storage.deleteObject(f.storageKey)));
     await prisma.user.delete({ where: { id: userId } });
+  }
+
+  async verifyEmail(dto: VerifyEmailDto) {
+    const record = await prisma.verificationToken.findUnique({ where: { token: dto.token } });
+    if (
+      !record ||
+      record.purpose !== "EMAIL_VERIFICATION" ||
+      record.usedAt ||
+      record.expiresAt < new Date()
+    ) {
+      throw new UnauthorizedException("This verification link is invalid or has expired.");
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { emailVerifiedAt: new Date() } }),
+      prisma.verificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    ]);
+  }
+
+  async resendVerification(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+    if (user.emailVerifiedAt) return;
+    await sendVerificationEmailFor(this.email, user);
+  }
+
+  /** Always resolves the same way regardless of whether the account exists — anti-enumeration. */
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const email = dto.email.toLowerCase().trim();
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return;
+
+    const token = await createVerificationToken(user.id, "PASSWORD_RESET", PASSWORD_RESET_TTL_MS);
+    await this.email.sendPasswordResetEmail(
+      user.email,
+      user.name,
+      `${this.webOrigin()}/reset-password?token=${token}`,
+    );
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const record = await prisma.verificationToken.findUnique({ where: { token: dto.token } });
+    if (!record || record.purpose !== "PASSWORD_RESET" || record.usedAt || record.expiresAt < new Date()) {
+      throw new UnauthorizedException("This password reset link is invalid or has expired.");
+    }
+
+    const passwordHash = await hashPassword(dto.newPassword);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      prisma.verificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      // Force re-login everywhere — standard practice after a credential reset.
+      prisma.session.deleteMany({ where: { userId: record.userId } }),
+    ]);
   }
 }

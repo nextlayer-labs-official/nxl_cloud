@@ -3,6 +3,7 @@ export interface SessionUser {
   email: string;
   name: string;
   avatarUrl: string | null;
+  emailVerifiedAt: Date | null;
 }
 
 export interface AdminSessionUser {

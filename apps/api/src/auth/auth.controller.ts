@@ -16,9 +16,12 @@ import { OrganizationsService } from "../organizations/organizations.service";
 import { AuthService } from "./auth.service";
 import { ChangePasswordDto } from "./dto/change-password.dto";
 import { DeleteAccountDto } from "./dto/delete-account.dto";
+import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
 import { UpdateProfileDto } from "./dto/update-profile.dto";
+import { VerifyEmailDto } from "./dto/verify-email.dto";
 import { SESSION_COOKIE, SessionGuard } from "./guards/session.guard";
 
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -88,6 +91,35 @@ export class AuthController {
   @UseGuards(SessionGuard)
   async changePassword(@Req() req: Request, @Body() dto: ChangePasswordDto) {
     await this.authService.changePassword(req.user!.id, dto);
+    return { success: true };
+  }
+
+  @Post("verify-email")
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    await this.authService.verifyEmail(dto);
+    return { success: true };
+  }
+
+  @Post("resend-verification")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(SessionGuard)
+  async resendVerification(@Req() req: Request) {
+    await this.authService.resendVerification(req.user!.id);
+    return { success: true };
+  }
+
+  @Post("forgot-password")
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    await this.authService.forgotPassword(dto);
+    return { success: true };
+  }
+
+  @Post("reset-password")
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto);
     return { success: true };
   }
 

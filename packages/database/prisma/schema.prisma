@@ -49,6 +49,17 @@ enum BillingCycle {
   ANNUAL
 }
 
+enum TokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum AccessRequestStatus {
+  PENDING
+  GRANTED
+  DENIED
+}
+
 model User {
   id              String    @id @default(cuid())
   email           String    @unique
@@ -59,17 +70,37 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  memberships        Membership[]
-  teamMemberships    TeamMembership[]
-  sessions           Session[]
-  uploadedFiles      File[]           @relation("FileUploadedBy")
-  fileVersions       FileVersion[]
-  createdFolders     Folder[]
-  permissionsGranted Permission[]     @relation("PermissionGrantedBy")
-  shareLinksCreated  ShareLink[]
-  comments           Comment[]
-  auditLogs          AuditLog[]
-  stars              Star[]
+  memberships            Membership[]
+  teamMemberships        TeamMembership[]
+  sessions               Session[]
+  uploadedFiles          File[]              @relation("FileUploadedBy")
+  fileVersions           FileVersion[]
+  createdFolders         Folder[]
+  permissionsGranted     Permission[]        @relation("PermissionGrantedBy")
+  shareLinksCreated      ShareLink[]
+  comments               Comment[]
+  auditLogs              AuditLog[]
+  stars                  Star[]
+  verificationTokens     VerificationToken[]
+  accessRequestsMade     AccessRequest[]     @relation("AccessRequestedBy")
+  accessRequestsResolved AccessRequest[]     @relation("AccessRequestResolvedBy")
+}
+
+/// One table for both email-verification and password-reset links — same
+/// "one source of truth" reasoning as AuditLog, rather than two near-identical
+/// token models.
+model VerificationToken {
+  id        String       @id @default(cuid())
+  userId    String
+  token     String       @unique
+  purpose   TokenPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
 }
 
 model Organization {
@@ -197,20 +228,53 @@ model FileVersion {
 
 /// Granular, resource-level access control ("down to the folder"). A null
 /// granteeId with granteeType ORGANIZATION means an org-wide default grant.
+/// A row can also be "pending" — shared to an email with no Nextlayer Cloud
+/// account yet (granteeId null, pendingEmail set). It grants nothing until
+/// claimed: registering with a matching email adopts every pending row as
+/// that user's real grant (see claimPendingGrants in permission.util.ts),
+/// mirroring Dropbox/Drive's "invite someone who hasn't signed up yet" flow.
 model Permission {
   id           String       @id @default(cuid())
   resourceType ResourceType
   resourceId   String
   granteeType  GranteeType
   granteeId    String?
+  pendingEmail String?
   accessLevel  AccessLevel
   createdById  String
   createdAt    DateTime     @default(now())
 
   createdBy User @relation("PermissionGrantedBy", fields: [createdById], references: [id], onDelete: Cascade)
 
+  @@unique([resourceType, resourceId, granteeType, granteeId])
+  @@unique([resourceType, resourceId, pendingEmail])
   @@index([resourceType, resourceId])
   @@index([granteeType, granteeId])
+  @@index([pendingEmail])
+}
+
+/// A "request access" from someone who hit a file/folder they don't have
+/// permission for (mirrors Drive's request-access flow). The resource's
+/// owner resolves it — GRANTED goes through the same grantPermission() path
+/// as a normal share, DENIED is just a dismissal. Re-requesting after a
+/// DENIED (or GRANTED, e.g. access was later revoked) resets it to PENDING
+/// rather than creating a duplicate row.
+model AccessRequest {
+  id            String              @id @default(cuid())
+  resourceType  ResourceType
+  resourceId    String
+  requestedById String
+  message       String?
+  status        AccessRequestStatus @default(PENDING)
+  resolvedById  String?
+  resolvedAt    DateTime?
+  createdAt     DateTime            @default(now())
+
+  requestedBy User  @relation("AccessRequestedBy", fields: [requestedById], references: [id], onDelete: Cascade)
+  resolvedBy  User? @relation("AccessRequestResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@unique([resourceType, resourceId, requestedById])
+  @@index([resourceType, resourceId])
 }
 
 /// Expiring, revocable, optionally password-protected external links.
@@ -357,22 +421,22 @@ model Plan {
 }
 
 model Subscription {
-  id                   String             @id @default(cuid())
-  organizationId       String             @unique
-  planId               String
-  status               SubscriptionStatus @default(TRIALING)
-  billingCycle         BillingCycle       @default(MONTHLY)
-  currentPeriodEnd     DateTime?
+  id                     String             @id @default(cuid())
+  organizationId         String             @unique
+  planId                 String
+  status                 SubscriptionStatus @default(TRIALING)
+  billingCycle           BillingCycle       @default(MONTHLY)
+  currentPeriodEnd       DateTime?
   /// Last Razorpay order created for this org's checkout (one-time charge per
   /// billing period — see Phase 7 in docs/roadmap.md for why not Subscriptions).
-  razorpayOrderId      String?
-  razorpayPaymentId    String?
+  razorpayOrderId        String?
+  razorpayPaymentId      String?
   /// Admin-set discount off the plan's list price (0-100). Enforced by this
   /// app's own price display, not a payment-gateway coupon.
-  discountPercent      Int?
+  discountPercent        Int?
   /// Admin-set "comped" date — while in the future, the customer is treated
   /// as fully paid regardless of `status`/billing, independent of `discountPercent`.
-  freeUntil            DateTime?
+  freeUntil              DateTime?
   /// Admin-set per-org storage cap in GB, overriding the plan's default
   /// (`Plan.storageLimitGb`). Null = inherit the plan's limit.
   storageLimitGbOverride Int?
@@ -380,9 +444,9 @@ model Subscription {
   /// automatically to reduce the amount charged on the next upgrade/switch.
   /// Never paid out or refunded directly — see billing.service.ts's
   /// proration math for how it's produced and consumed.
-  creditBalanceCents   Int                @default(0)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  creditBalanceCents     Int                @default(0)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan         Plan         @relation(fields: [planId], references: [id])

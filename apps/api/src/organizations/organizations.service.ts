@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
+import type { UpdateOrganizationDto } from "./dto/update-organization.dto";
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 
@@ -57,6 +58,13 @@ export class OrganizationsService {
       limitBytes: this.effectiveLimitBytes(subscription),
       planName: subscription?.plan.name ?? null,
     };
+  }
+
+  async updateName(userId: string, dto: UpdateOrganizationDto) {
+    const membership = await this.getPrimaryMembership(userId);
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException("Workspace name can't be empty.");
+    return prisma.organization.update({ where: { id: membership.organizationId }, data: { name } });
   }
 
   /** Raw current storage usage for an org, in bytes — shared by quota checks and the downgrade storage-fit gate. */

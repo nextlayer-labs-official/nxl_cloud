@@ -37,6 +37,7 @@ export class SessionGuard implements CanActivate {
       email: session.user.email,
       name: session.user.name,
       avatarUrl: session.user.avatarUrl,
+      emailVerifiedAt: session.user.emailVerifiedAt,
     };
     return true;
   }

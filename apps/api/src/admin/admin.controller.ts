@@ -60,6 +60,18 @@ export class AdminController {
     return this.adminService.reactivateOrganization(id);
   }
 
+  @Post("organizations/:id/members/:userId/verify-email")
+  @HttpCode(HttpStatus.OK)
+  markMemberVerified(@Param("id") id: string, @Param("userId") userId: string) {
+    return this.adminService.markMemberVerified(id, userId);
+  }
+
+  @Post("organizations/:id/members/:userId/resend-verification")
+  @HttpCode(HttpStatus.OK)
+  resendMemberVerification(@Param("id") id: string, @Param("userId") userId: string) {
+    return this.adminService.resendMemberVerification(id, userId);
+  }
+
   @Patch("organizations/:id/subscription")
   updateSubscription(@Param("id") id: string, @Body() dto: UpdateSubscriptionDto) {
     return this.adminService.updateSubscription(id, dto);

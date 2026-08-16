@@ -1,42 +1,71 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { prisma } from "@nextlayer/database";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { prisma, type AccessLevel } from "@nextlayer/database";
 import { recordAuditLog } from "../audit/audit-log.util";
+import { EmailService } from "../email/email.service";
 import { OrganizationsService } from "../organizations/organizations.service";
-import { activeShareResourceIds, getOrCreateShareLink, revokeShareLink } from "../share/share-link.util";
+import {
+  createOrRefreshAccessRequest,
+  getMyAccessRequest,
+  listPendingAccessRequests,
+  resolveAccessRequest,
+} from "../permissions/access-request.util";
+import {
+  getDirectAccessLevel,
+  getInheritedFolderAccess,
+  getSharedWithMe as getSharedWithMeIds,
+  grantPermission,
+  invitePendingGrant,
+  listResourcePermissions,
+} from "../permissions/permission.util";
+import {
+  activeShareResourceIds,
+  getActiveShareLink,
+  getOrCreateShareLink,
+  revokeShareLink,
+} from "../share/share-link.util";
 import { activeStarResourceIds, addStar, removeStar } from "../star/star.util";
 import { StorageService } from "../storage/storage.service";
 import type { CreateFolderDto } from "./dto/create-folder.dto";
 import type { MoveFolderDto } from "./dto/move-folder.dto";
 import type { RenameFolderDto } from "./dto/rename-folder.dto";
+import type { RequestAccessDto } from "./dto/request-access.dto";
+import type { ResolveAccessRequestDto } from "./dto/resolve-access-request.dto";
+import type { ShareWithUserDto } from "./dto/share-with-user.dto";
 
 @Injectable()
 export class FoldersService {
   constructor(
     private readonly organizations: OrganizationsService,
     private readonly storage: StorageService,
+    private readonly email: EmailService,
   ) {}
 
+  /**
+   * Root ("My Files", no parentId) always stays scoped to the viewer's own
+   * org — shared items never mix into it, only reachable via the dedicated
+   * Shared view or a direct navigate into a shared folder, matching Drive.
+   * A given `parentId` resolves access (own org, or a Viewer/Editor grant)
+   * and lists children scoped to *that folder's* org, which may not be the
+   * viewer's own — that's what makes browsing into a shared folder work.
+   */
   async listContents(userId: string, parentId: string | undefined) {
     const membership = await this.organizations.getPrimaryMembership(userId);
 
+    let organizationId = membership.organizationId;
+    let accessLevel: "OWNER" | AccessLevel = "OWNER";
     if (parentId) {
-      const parent = await prisma.folder.findUnique({ where: { id: parentId } });
-      if (!parent || parent.organizationId !== membership.organizationId || parent.deletedAt) {
-        throw new NotFoundException("Folder not found.");
-      }
+      const resolved = await this.resolveFolderAccess(userId, parentId);
+      organizationId = resolved.folder.organizationId;
+      accessLevel = resolved.accessLevel;
     }
 
     const [folders, files] = await Promise.all([
       prisma.folder.findMany({
-        where: { organizationId: membership.organizationId, parentId: parentId ?? null, deletedAt: null },
+        where: { organizationId, parentId: parentId ?? null, deletedAt: null },
         orderBy: { name: "asc" },
       }),
       prisma.file.findMany({
-        where: {
-          organizationId: membership.organizationId,
-          folderId: parentId ?? null,
-          deletedAt: null,
-        },
+        where: { organizationId, folderId: parentId ?? null, deletedAt: null },
         orderBy: { name: "asc" },
       }),
     ]);
@@ -63,6 +92,7 @@ export class FoldersService {
     ]);
 
     return {
+      accessLevel,
       folders: folders.map((f) => ({
         ...f,
         isShared: sharedFolderIds.has(f.id),
@@ -146,16 +176,19 @@ export class FoldersService {
   async create(userId: string, dto: CreateFolderDto) {
     const membership = await this.organizations.getPrimaryMembership(userId);
 
+    // New folder belongs to the parent's org — not necessarily the creator's
+    // own, since an Editor-shared collaborator can create subfolders inside
+    // someone else's shared folder (this is the one "adding new things"
+    // capability in scope for shared Editors; genuine file upload isn't yet).
+    let organizationId = membership.organizationId;
     if (dto.parentId) {
-      const parent = await prisma.folder.findUnique({ where: { id: dto.parentId } });
-      if (!parent || parent.organizationId !== membership.organizationId || parent.deletedAt) {
-        throw new NotFoundException("Parent folder not found.");
-      }
+      const parent = await this.getAccessibleFolder(userId, dto.parentId, "EDITOR");
+      organizationId = parent.organizationId;
     }
 
     const folder = await prisma.folder.create({
       data: {
-        organizationId: membership.organizationId,
+        organizationId,
         parentId: dto.parentId ?? null,
         name: dto.name,
         createdById: userId,
@@ -169,15 +202,22 @@ export class FoldersService {
     await recordAuditLog(folder.organizationId, actorId, action, "FOLDER", folder.id, metadata);
   }
 
-  /** Full ancestor chain from root to this folder, for breadcrumb navigation. */
+  /**
+   * Full ancestor chain from root to this folder, for breadcrumb navigation.
+   * Only the starting folder's access is resolved (own org, or a
+   * Viewer/Editor grant, direct or inherited) — once that's established the
+   * ancestor walk itself just needs to exist and not be trashed, since access
+   * to the starting folder already implies access to its own chain.
+   */
   async getBreadcrumb(userId: string, folderId: string) {
-    const membership = await this.organizations.getPrimaryMembership(userId);
+    await this.resolveFolderAccess(userId, folderId);
+
     const trail: { id: string; name: string }[] = [];
     let currentId: string | null = folderId;
 
     while (currentId) {
       const folder = await prisma.folder.findUnique({ where: { id: currentId } });
-      if (!folder || folder.organizationId !== membership.organizationId || folder.deletedAt) {
+      if (!folder || folder.deletedAt) {
         throw new NotFoundException("Folder not found.");
       }
       trail.unshift({ id: folder.id, name: folder.name });
@@ -194,6 +234,33 @@ export class FoldersService {
       throw new NotFoundException("Folder not found.");
     }
     return folder;
+  }
+
+  /**
+   * Own org -> "OWNER" (today's exact rule). Otherwise a direct Permission
+   * grant on this folder, or one inherited from its own parent chain —
+   * sharing a folder cascades to every subfolder inside it. "Not found" on
+   * no access, matching resolveFileAccess's reasoning in files.service.ts.
+   */
+  private async resolveFolderAccess(userId: string, folderId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
+    if (!folder || folder.deletedAt) throw new NotFoundException("Folder not found.");
+    if (folder.organizationId === membership.organizationId) {
+      return { folder, accessLevel: "OWNER" as const };
+    }
+    const direct = await getDirectAccessLevel("FOLDER", folder.id, userId);
+    const level = direct ?? (await getInheritedFolderAccess(userId, folder.parentId));
+    if (!level) throw new NotFoundException("Folder not found.");
+    return { folder, accessLevel: level };
+  }
+
+  private async getAccessibleFolder(userId: string, folderId: string, minLevel: "VIEWER" | "EDITOR") {
+    const { folder, accessLevel } = await this.resolveFolderAccess(userId, folderId);
+    if (accessLevel === "OWNER") return folder;
+    if (minLevel === "VIEWER") return folder;
+    if (minLevel === "EDITOR" && accessLevel === "EDITOR") return folder;
+    throw new NotFoundException("Folder not found.");
   }
 
   private async getTrashedFolder(userId: string, folderId: string) {
@@ -222,6 +289,12 @@ export class FoldersService {
     return descendants;
   }
 
+  /** Read-only — lets the Share modal show the current on/off state without turning link-sharing on just by opening it. */
+  async getShareLinkStatus(userId: string, folderId: string) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    return getActiveShareLink("FOLDER", folder.id);
+  }
+
   async createShareLink(userId: string, folderId: string) {
     const folder = await this.getOwnedFolder(userId, folderId);
     const link = await getOrCreateShareLink("FOLDER", folder.id, userId);
@@ -235,8 +308,232 @@ export class FoldersService {
     await this.logFolderActivity(folder, userId, "folder.unshared");
   }
 
-  async rename(userId: string, folderId: string, dto: RenameFolderDto) {
+  /** Sharing with an existing account grants real access immediately; an email with no account gets a Dropbox/Drive-style pending invite instead, claimed automatically the moment they register (see claimPendingGrants). */
+  async sharePermission(userId: string, folderId: string, dto: ShareWithUserDto) {
     const folder = await this.getOwnedFolder(userId, folderId);
+    const email = dto.email.toLowerCase().trim();
+
+    const [sharer, grantee] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId } }),
+      prisma.user.findUnique({ where: { email } }),
+    ]);
+    if (grantee?.id === userId) {
+      throw new ConflictException("You already own this folder.");
+    }
+
+    const sharerName = sharer?.name ?? "Someone";
+    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    const resourcePath = `/portal/folder/${folder.id}`;
+
+    if (grantee) {
+      await grantPermission("FOLDER", folder.id, grantee.id, dto.accessLevel, userId);
+      await this.logFolderActivity(folder, userId, "folder.shared_with_user", { email, accessLevel: dto.accessLevel });
+      await this.email.sendShareNotificationEmail(
+        grantee.email,
+        sharerName,
+        folder.name,
+        "folder",
+        dto.accessLevel,
+        `${webOrigin}${resourcePath}`,
+      );
+    } else {
+      await invitePendingGrant("FOLDER", folder.id, email, dto.accessLevel, userId);
+      await this.logFolderActivity(folder, userId, "folder.invited", { email, accessLevel: dto.accessLevel });
+      const registerLink = `${webOrigin}/register?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(resourcePath)}`;
+      await this.email.sendInviteEmail(email, sharerName, folder.name, "folder", dto.accessLevel, registerLink);
+    }
+    return listResourcePermissions("FOLDER", folder.id);
+  }
+
+  async listPermissions(userId: string, folderId: string) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    return listResourcePermissions("FOLDER", folder.id);
+  }
+
+  private async getOwnedPermission(userId: string, folderId: string, permissionId: string) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    const permission = await prisma.permission.findUnique({ where: { id: permissionId } });
+    if (!permission || permission.resourceType !== "FOLDER" || permission.resourceId !== folder.id) {
+      throw new NotFoundException("Grant not found.");
+    }
+    return { folder, permission };
+  }
+
+  async updatePermission(userId: string, folderId: string, permissionId: string, accessLevel: AccessLevel) {
+    const { folder } = await this.getOwnedPermission(userId, folderId, permissionId);
+    await prisma.permission.update({ where: { id: permissionId }, data: { accessLevel } });
+    return listResourcePermissions("FOLDER", folder.id);
+  }
+
+  async revokePermission(userId: string, folderId: string, permissionId: string) {
+    const { folder, permission } = await this.getOwnedPermission(userId, folderId, permissionId);
+    await prisma.permission.delete({ where: { id: permissionId } });
+    await this.logFolderActivity(folder, userId, "folder.unshared_from_user", {
+      email: permission.pendingEmail ?? undefined,
+    });
+    return listResourcePermissions("FOLDER", folder.id);
+  }
+
+  /**
+   * Non-throwing counterpart to resolveFolderAccess — a genuinely missing/deleted
+   * folder is still a 404, but a folder that exists with no access reports back
+   * so the frontend can offer "Request access" instead of a dead end.
+   */
+  async getAccessStatus(userId: string, folderId: string) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
+    if (!folder || folder.deletedAt) throw new NotFoundException("Folder not found.");
+
+    let accessLevel: "OWNER" | AccessLevel | null = null;
+    if (folder.organizationId === membership.organizationId) {
+      accessLevel = "OWNER";
+    } else {
+      const direct = await getDirectAccessLevel("FOLDER", folder.id, userId);
+      accessLevel = direct ?? (await getInheritedFolderAccess(userId, folder.parentId));
+    }
+
+    if (accessLevel) return { hasAccess: true as const, accessLevel, name: folder.name };
+
+    const myRequest = await getMyAccessRequest("FOLDER", folder.id, userId);
+    return { hasAccess: false as const, name: folder.name, requestStatus: myRequest?.status ?? null };
+  }
+
+  async requestAccess(userId: string, folderId: string, dto: RequestAccessDto) {
+    const membership = await this.organizations.getPrimaryMembership(userId);
+    const folder = await prisma.folder.findUnique({ where: { id: folderId } });
+    if (!folder || folder.deletedAt) throw new NotFoundException("Folder not found.");
+    if (folder.organizationId === membership.organizationId) {
+      throw new ConflictException("You already have access to this folder.");
+    }
+    const direct = await getDirectAccessLevel("FOLDER", folder.id, userId);
+    const inherited = direct ?? (await getInheritedFolderAccess(userId, folder.parentId));
+    if (inherited) throw new ConflictException("You already have access to this folder.");
+
+    const request = await createOrRefreshAccessRequest("FOLDER", folder.id, userId, dto.message);
+    await this.logFolderActivity(folder, userId, "folder.access_requested");
+
+    const [requester, owner] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId } }),
+      prisma.user.findUnique({ where: { id: folder.createdById } }),
+    ]);
+    if (owner) {
+      await this.email.sendAccessRequestEmail(
+        owner.email,
+        requester?.name ?? "Someone",
+        folder.name,
+        "folder",
+        dto.message,
+        `${process.env.WEB_ORIGIN ?? "http://localhost:3000"}/portal/folder/${folder.id}`,
+      );
+    }
+    return { status: request.status };
+  }
+
+  /** Owner-only — pending requests for a folder they own. */
+  async listAccessRequests(userId: string, folderId: string) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    return listPendingAccessRequests("FOLDER", folder.id);
+  }
+
+  /** Owner-only. GRANT reuses the same grantPermission()/notification path as a normal share; DENY just dismisses the request and lets the requester know. */
+  async resolveFolderAccessRequest(
+    userId: string,
+    folderId: string,
+    requestId: string,
+    dto: ResolveAccessRequestDto,
+  ) {
+    const folder = await this.getOwnedFolder(userId, folderId);
+    const request = await prisma.accessRequest.findUnique({ where: { id: requestId } });
+    if (!request || request.resourceType !== "FOLDER" || request.resourceId !== folder.id) {
+      throw new NotFoundException("Request not found.");
+    }
+    const requester = await prisma.user.findUnique({ where: { id: request.requestedById } });
+    if (!requester) throw new NotFoundException("Request not found.");
+
+    if (dto.decision === "GRANT") {
+      const accessLevel = dto.accessLevel ?? "VIEWER";
+      await resolveAccessRequest(request.id, userId, "GRANTED");
+      await grantPermission("FOLDER", folder.id, requester.id, accessLevel, userId);
+      await this.logFolderActivity(folder, userId, "folder.shared_with_user", {
+        email: requester.email,
+        accessLevel,
+      });
+      const sharer = await prisma.user.findUnique({ where: { id: userId } });
+      await this.email.sendShareNotificationEmail(
+        requester.email,
+        sharer?.name ?? "Someone",
+        folder.name,
+        "folder",
+        accessLevel,
+        `${process.env.WEB_ORIGIN ?? "http://localhost:3000"}/portal/folder/${folder.id}`,
+      );
+    } else {
+      await resolveAccessRequest(request.id, userId, "DENIED");
+      await this.logFolderActivity(folder, userId, "folder.access_request_denied", { email: requester.email });
+      await this.email.sendAccessDeniedEmail(requester.email, folder.name, "folder");
+    }
+
+    return listPendingAccessRequests("FOLDER", folder.id);
+  }
+
+  /** Folders/files directly shared with this user — not org-scoped, since they belong to other orgs by definition. Annotated with the owning org's name for "shared by X" context in the UI. */
+  async getSharedWithMe(userId: string) {
+    const { folderIds, fileIds } = await getSharedWithMeIds(userId);
+
+    const [folders, files] = await Promise.all([
+      folderIds.length
+        ? prisma.folder.findMany({
+            where: { id: { in: folderIds }, deletedAt: null },
+            include: { organization: { select: { name: true } } },
+          })
+        : Promise.resolve([]),
+      fileIds.length
+        ? prisma.file.findMany({
+            where: { id: { in: fileIds }, deletedAt: null },
+            include: { organization: { select: { name: true } } },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const [sharedFolderIds, sharedFileIds, starredFolderIds, starredFileIds] = await Promise.all([
+      activeShareResourceIds(
+        "FOLDER",
+        folders.map((f) => f.id),
+      ),
+      activeShareResourceIds(
+        "FILE",
+        files.map((f) => f.id),
+      ),
+      activeStarResourceIds(
+        "FOLDER",
+        folders.map((f) => f.id),
+        userId,
+      ),
+      activeStarResourceIds(
+        "FILE",
+        files.map((f) => f.id),
+        userId,
+      ),
+    ]);
+
+    return {
+      folders: folders.map(({ organization, ...f }) => ({
+        ...f,
+        isShared: sharedFolderIds.has(f.id),
+        isStarred: starredFolderIds.has(f.id),
+        sharedByOrgName: organization.name,
+      })),
+      files: files.map(({ organization, ...f }) => ({
+        ...f,
+        isShared: sharedFileIds.has(f.id),
+        isStarred: starredFileIds.has(f.id),
+        sharedByOrgName: organization.name,
+      })),
+    };
+  }
+
+  async rename(userId: string, folderId: string, dto: RenameFolderDto) {
+    const folder = await this.getAccessibleFolder(userId, folderId, "EDITOR");
     const name = dto.name.trim();
     if (!name) throw new BadRequestException("Name can't be empty.");
     const updated = await prisma.folder.update({ where: { id: folder.id }, data: { name } });
@@ -296,8 +593,9 @@ export class FoldersService {
    * The Wasabi objects are untouched here; permanentlyDelete is what actually
    * removes them, same split as files use.
    */
+  /** EDITOR-minimum (not owner-only) — matches Dropbox/Drive, where an editor on shared content can delete it; restore/permanentlyDelete/move/share stay owner-only. */
   async remove(userId: string, folderId: string) {
-    const folder = await this.getOwnedFolder(userId, folderId);
+    const folder = await this.getAccessibleFolder(userId, folderId, "EDITOR");
     const descendantIds = await this.collectDescendantFolderIds(folder.id);
     const allFolderIds = [folder.id, ...descendantIds];
     const now = new Date();
@@ -358,12 +656,12 @@ export class FoldersService {
   }
 
   async star(userId: string, folderId: string) {
-    const folder = await this.getOwnedFolder(userId, folderId);
+    const folder = await this.getAccessibleFolder(userId, folderId, "VIEWER");
     await addStar("FOLDER", folder.id, folder.organizationId, userId);
   }
 
   async unstar(userId: string, folderId: string) {
-    const folder = await this.getOwnedFolder(userId, folderId);
+    const folder = await this.getAccessibleFolder(userId, folderId, "VIEWER");
     await removeStar("FOLDER", folder.id, userId);
   }
 
