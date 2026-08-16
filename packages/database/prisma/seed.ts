@@ -27,7 +27,6 @@ async function main() {
         priceMonthlyCents: 1200,
         priceYearlyCents: 1000,
         storageLimitGb: 1024,
-        seatLimit: null,
         features: ["1TB storage per user", "Basic sharing controls", "Email support"],
       },
     }),
@@ -39,7 +38,6 @@ async function main() {
         priceMonthlyCents: 2400,
         priceYearlyCents: 1900,
         storageLimitGb: null,
-        seatLimit: null,
         features: [
           "Unlimited storage",
           "Advanced permissions",
@@ -56,7 +54,6 @@ async function main() {
         priceMonthlyCents: null,
         priceYearlyCents: null,
         storageLimitGb: null,
-        seatLimit: null,
         features: ["Dedicated SLA", "Data residency options", "Custom contracts"],
       },
     }),
