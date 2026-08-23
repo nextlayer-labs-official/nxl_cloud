@@ -58,6 +58,13 @@ const UPLOAD_FAILED_MESSAGE =
 
 const VIEW_MODE_STORAGE_KEY = "nxl-file-view-mode";
 
+// A local/fast API response can resolve in a handful of milliseconds, making
+// the loading skeleton flash for less than a frame — indistinguishable from
+// "nothing happened." Padding it to a minimum visible duration keeps the
+// transition legible without slowing down genuinely slow loads (which just
+// take their real, longer time regardless of this floor).
+const MIN_LOADING_MS = 300;
+
 interface UploadTask {
   id: string;
   name: string;
@@ -211,6 +218,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
     setLoading(true);
     setError(null);
     setAccessStatus(null);
+    const startedAt = Date.now();
     try {
       const query = folderId ? `?parentId=${folderId}` : "";
       const [contents, crumb] = await Promise.all([
@@ -240,6 +248,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
       }
       setError(err instanceof ApiError ? err.message : "Couldn't load this folder.");
     } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_LOADING_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_LOADING_MS - elapsed));
+      }
       setLoading(false);
     }
   }, [folderId]);
