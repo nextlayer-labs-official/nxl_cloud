@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `organization` ADD COLUMN `suspendedAt` DATETIME(3) NULL;
+ALTER TABLE `Organization` ADD COLUMN `suspendedAt` DATETIME(3) NULL;
 
 -- CreateTable
 CREATE TABLE `AdminUser` (

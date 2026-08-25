@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE `folder` ADD COLUMN `deletedAt` DATETIME(3) NULL;
+ALTER TABLE `Folder` ADD COLUMN `deletedAt` DATETIME(3) NULL;

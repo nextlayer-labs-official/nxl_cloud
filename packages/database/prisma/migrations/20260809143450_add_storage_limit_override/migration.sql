@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE `subscription` ADD COLUMN `storageLimitGbOverride` INTEGER NULL;
+ALTER TABLE `Subscription` ADD COLUMN `storageLimitGbOverride` INTEGER NULL;

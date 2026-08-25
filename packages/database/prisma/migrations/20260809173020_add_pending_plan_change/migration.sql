@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `subscription` ADD COLUMN `pendingBillingCycle` ENUM('MONTHLY', 'ANNUAL') NULL,
+ALTER TABLE `Subscription` ADD COLUMN `pendingBillingCycle` ENUM('MONTHLY', 'ANNUAL') NULL,
     ADD COLUMN `pendingPlanId` VARCHAR(191) NULL;
 
 -- AddForeignKey

@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `permission` ADD COLUMN `pendingEmail` VARCHAR(191) NULL;
+ALTER TABLE `Permission` ADD COLUMN `pendingEmail` VARCHAR(191) NULL;
 
 -- CreateIndex
 CREATE INDEX `Permission_pendingEmail_idx` ON `Permission`(`pendingEmail`);

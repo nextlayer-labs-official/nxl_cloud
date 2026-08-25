@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE `user` DROP COLUMN `isAdmin`;
+ALTER TABLE `User` DROP COLUMN `isAdmin`;
