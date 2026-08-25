@@ -5,6 +5,17 @@ already installed. It's written from an actual deployment run, including the
 mistakes — the Troubleshooting section at the bottom covers every error you're
 likely to hit.
 
+### Quick reference: there are two separate env files
+
+| File | Read by | Contains | After editing |
+|---|---|---|---|
+| `.env` (repo root) | `apps/api` (backend), at process startup | `DATABASE_URL`, `WEB_ORIGIN`, Wasabi, Razorpay, SMTP | `pm2 restart nxl-api` |
+| `apps/web/.env.local` | `apps/web` (frontend), baked in at build time | `NEXT_PUBLIC_API_URL` | `npm run build:web` **then** `pm2 restart nxl-web` |
+
+Editing the wrong one, or forgetting the rebuild step for the web one, is
+the single most common source of confusion below — when in doubt, check
+this table first.
+
 ## 1. Prerequisites
 
 Node 20+:
@@ -62,6 +73,17 @@ degrades gracefully without them:
   of sent, so those flows won't be end-to-end testable for real users. Use
   test-mode Razorpay keys for staging (not live), and a real SMTP provider
   (or Mailtrap) if you want colleagues to actually receive emails.
+
+**Adding any of these later?** Just restart — no rebuild needed:
+```bash
+pm2 restart nxl-api
+pm2 logs nxl-api --lines 30
+```
+This file is read fresh at process startup (unlike `apps/web/.env.local`
+below, which gets compiled into the browser bundle and needs a full
+rebuild). Test each one actually works after restarting: upload a file
+(Wasabi), run checkout on `/portal/settings` (Razorpay), and register or
+hit "Resend verification" (SMTP) — check the email actually arrives.
 
 ## 5. Web app's own env — the #1 source of confusing errors
 
