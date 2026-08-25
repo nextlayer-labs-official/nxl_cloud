@@ -129,10 +129,16 @@ module.exports = {
 ```
 
 ```bash
+pm2 delete all   # clears out any partial/failed runs from earlier attempts
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup   # follow the printed command to enable on boot
 ```
+
+`pm2 delete all` before starting fresh matters more than it looks — if an
+earlier `pm2 start` attempt half-succeeded (e.g. `nxl-web` came up before
+`nxl-api` errored), just re-running `pm2 start ecosystem.config.js` can
+leave stale/duplicate process entries around instead of replacing them.
 
 ## 9. Firewall
 
@@ -160,6 +166,21 @@ From another machine, open `http://<vps-ip>:4001` in a browser and try
 ---
 
 ## Troubleshooting
+
+**`migrate deploy` fails partway through with error P3018**
+A migration failed mid-way, and Prisma now refuses to apply any further
+migrations until that's resolved — you can't just re-run it and continue.
+On a fresh/empty staging database with nothing to lose, the simplest fix is
+to wipe it and start clean rather than trying to hand-repair migration
+state:
+```bash
+sudo mysql -e "DROP DATABASE nextlayer_cloud_dev; CREATE DATABASE nextlayer_cloud_dev; GRANT ALL PRIVILEGES ON nextlayer_cloud_dev.* TO 'nxl'@'localhost'; FLUSH PRIVILEGES;"
+git pull   # picks up any migration fixes
+npm run migrate:deploy --workspace=@nextlayer/database
+```
+If it fails on a *different* migration than last time, that's a distinct
+bug in that migration file, not the same issue recurring — check the exact
+error and table/column it names.
 
 **`Error: Script not found: .../apps/api/dist/main.js`**
 `npm run build:api` was never run (or failed). Run it, check it completes
