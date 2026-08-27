@@ -96,6 +96,20 @@ function putWithProgress(
   });
 }
 
+/**
+ * `crypto.randomUUID()` only exists in secure contexts (HTTPS, or localhost)
+ * — on a plain-HTTP deployment (a bare IP, no TLS) it's undefined and throws,
+ * silently killing the upload before any network request fires. This id is
+ * only ever used as a local React-state key for the upload-progress list, so
+ * it doesn't need to be a real UUID — just unique within the session.
+ */
+function generateLocalId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function summarizeUploads(uploads: UploadTask[]): string {
   const active = uploads.filter((u) => u.status === "uploading").length;
   if (active > 0) return `Uploading ${active} item${active === 1 ? "" : "s"}`;
@@ -286,7 +300,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
 
   const uploadFile = useCallback(
     async (file: File) => {
-      const id = crypto.randomUUID();
+      const id = generateLocalId();
       const mimeType = file.type || "application/octet-stream";
       setUploadsCollapsed(false);
       setUploads((prev) => [...prev, { id, name: file.name, mimeType, progress: 0, status: "uploading" }]);
