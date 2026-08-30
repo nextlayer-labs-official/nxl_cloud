@@ -1,9 +1,5 @@
 import type { FooterColumn } from "@/types/footer";
 
-/**
- * Full footer's link columns (Home only). Security, Documentation, Careers, and
- * Resources are stub "coming soon" pages — see components/marketing/coming-soon.tsx.
- */
 export const FOOTER_COLUMNS: FooterColumn[] = [
   {
     title: "Product",
@@ -11,23 +7,20 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
       { label: "Features", href: "/features" },
       { label: "Solutions", href: "/solutions" },
       { label: "Pricing", href: "/pricing" },
-      { label: "Security", href: "/security" },
+      { label: "Partners", href: "/partners" },
     ],
   },
   {
     title: "Company",
     links: [
       { label: "About", href: "/about" },
-      { label: "Careers", href: "/careers" },
-      { label: "Blog", href: "/blog" },
       { label: "Contact", href: "/contact" },
     ],
   },
   {
-    title: "Resources",
+    title: "Support",
     links: [
       { label: "FAQ", href: "/faq" },
-      { label: "Resources", href: "/resources" },
       { label: "Log in", href: "/login" },
     ],
   },

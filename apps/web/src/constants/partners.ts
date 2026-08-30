@@ -1,28 +1,23 @@
-export interface PartnerPanel {
+export interface PartnerBenefit {
   title: string;
-  items: string[];
-  cta: string;
+  body: string;
 }
 
-export const PARTNER_PANELS: PartnerPanel[] = [
+export const PARTNER_BENEFITS: PartnerBenefit[] = [
   {
-    title: "Technology Partners",
-    items: [
-      "Build deep integrations with our API",
-      "Get listed in our integrations directory",
-      "Co-marketing opportunities",
-    ],
-    cta: "Apply as technology partner",
+    title: "Your own portal",
+    body: "Log in separately from your customers to see every workspace mapped to your code in one place.",
   },
   {
-    title: "Reseller Partners",
-    items: [
-      "Resell Nextlayer Cloud to your customers",
-      "Volume discount pricing",
-      "Dedicated partner support",
-    ],
-    cta: "Apply as reseller",
+    title: "Negotiated pricing",
+    body: "We set your rate per plan — you see it alongside the retail price, so your margin is always clear.",
+  },
+  {
+    title: "Prepaid wallet",
+    body: "Fund your account and activate or change a customer's plan instantly — no invoicing back and forth per change.",
+  },
+  {
+    title: "You stay in control",
+    body: "A customer can't change their own plan while mapped to you, and can't leave without your approval either.",
   },
 ];
-
-export const PARTNER_LOGOS = ["Okta", "Slack", "Zapier", "DocuSign", "HubSpot"];

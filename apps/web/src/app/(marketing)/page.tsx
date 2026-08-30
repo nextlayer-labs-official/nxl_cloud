@@ -1,25 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AnnouncementBar } from "@/components/layout/announcement-bar";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { PlaceholderVisual } from "@/components/common/placeholder-visual";
-import { LogoStrip } from "@/components/common/logo-strip";
 import { FeatureRow } from "@/components/marketing/feature-row";
-import { StatGrid } from "@/components/marketing/stat-grid";
-import { PricingCard } from "@/components/marketing/pricing-card";
+import { DynamicPricingSection } from "@/components/marketing/dynamic-pricing";
 import { FaqList } from "@/components/marketing/faq-list";
-import {
-  TRUSTED_LOGOS,
-  FEATURE_ROWS,
-  SECURITY_COLUMNS,
-  BENEFITS,
-  INTEGRATIONS,
-  HOME_PRICING_TIERS,
-  HOME_TESTIMONIALS,
-  HOME_FAQS,
-  COMPARISON,
-} from "@/constants/home";
+import { FEATURE_ROWS, SECURITY_COLUMNS, HOME_FAQS, COMPARISON } from "@/constants/home";
 
 export const metadata: Metadata = {
   description:
@@ -29,16 +16,12 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <div className="text-foreground w-full overflow-x-hidden">
-      <AnnouncementBar />
       <Header />
 
       {/* Hero */}
       <section className="relative bg-[radial-gradient(ellipse_900px_500px_at_75%_20%,oklch(0.93_0.04_255)_0%,transparent_70%)] px-10 pt-[120px] pb-[100px]">
         <div className="mx-auto grid max-w-[1280px] grid-cols-[1.1fr_0.9fr] items-center gap-16">
           <div>
-            <div className="bg-accent text-accent-foreground mb-6 inline-block rounded-full px-3.5 py-1.5 text-[13px] font-semibold">
-              Trusted by 2,000+ businesses
-            </div>
             <h1 className="mb-6 text-[56px] leading-[1.08] font-bold tracking-[-0.02em]">
               Secure cloud storage for modern businesses
             </h1>
@@ -51,13 +34,13 @@ export default function HomePage() {
                 href="/register"
                 className="bg-primary text-primary-foreground hover:bg-brand-hover rounded-lg px-7 py-3.5 text-base font-semibold"
               >
-                Start free trial
+                Get started
               </Link>
               <Link
                 href="/contact"
                 className="border-input text-foreground hover:border-ink-300 rounded-lg border px-7 py-3.5 text-base font-semibold"
               >
-                Talk to sales
+                Talk to us
               </Link>
             </div>
           </div>
@@ -88,8 +71,6 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-
-      <LogoStrip label="Trusted by teams at" logos={TRUSTED_LOGOS} logoClassName="text-ink-300" />
 
       {/* Product screenshot */}
       <section className="px-10 py-[140px]">
@@ -157,7 +138,7 @@ export default function HomePage() {
               <div className="bg-border h-2.5 w-4/5 rounded-[5px]" />
               <div className="flex items-center gap-2">
                 <div className="bg-success h-2 w-2 animate-[pulse-dot_2s_ease-in-out_infinite] rounded-full" />
-                <div className="text-ink-550 text-xs">3 people editing now</div>
+                <div className="text-ink-550 text-xs">Shared with your team</div>
               </div>
             </div>
           </div>
@@ -169,17 +150,10 @@ export default function HomePage() {
               Work together without the version chaos
             </h2>
             <p className="text-muted-foreground text-[17px] leading-[1.6]">
-              Real-time presence, comments, and shared team spaces keep everyone aligned — with a
-              full history of who changed what, when.
+              Shared team spaces and full version history keep everyone aligned — with a complete
+              history of who changed what, when.
             </p>
           </div>
-        </div>
-      </section>
-
-      {/* Benefits */}
-      <section className="bg-surface-muted px-10 py-[100px]">
-        <div className="mx-auto max-w-[1180px]">
-          <StatGrid stats={BENEFITS} className="grid-cols-4" />
         </div>
       </section>
 
@@ -214,37 +188,14 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Integrations */}
-      <section className="px-10 pb-[140px] text-center">
-        <div className="mx-auto max-w-[1080px]">
-          <h2 className="mb-12 text-[32px] font-bold tracking-[-0.02em]">
-            Works with the tools you already use
-          </h2>
-          <div className="grid grid-cols-6 gap-4">
-            {INTEGRATIONS.map((name) => (
-              <div
-                key={name}
-                className="border-border text-ink-550 rounded-xl border px-3 py-6 font-mono text-xs transition hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-6px_oklch(0.22_0.02_260_/_0.15)]"
-              >
-                {name}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Pricing */}
       <section className="bg-surface-muted px-10 py-[140px]">
-        <div className="mx-auto max-w-[1180px]">
-          <h2 className="mb-14 text-center text-[32px] font-bold tracking-[-0.02em]">
+        <div className="mx-auto max-w-[1180px] text-center">
+          <h2 className="mb-14 text-[32px] font-bold tracking-[-0.02em]">
             Simple, transparent pricing
           </h2>
-          <div className="grid grid-cols-3 gap-6">
-            {HOME_PRICING_TIERS.map((tier) => (
-              <PricingCard key={tier.name} tier={tier} />
-            ))}
-          </div>
-          <div className="mt-8 text-center">
+          <DynamicPricingSection />
+          <div className="mt-10">
             <Link href="/pricing" className="text-[15px]">
               Compare all features →
             </Link>
@@ -252,22 +203,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="px-10 py-[140px]">
-        <div className="mx-auto grid max-w-[1080px] grid-cols-2 gap-8">
-          {HOME_TESTIMONIALS.map((t) => (
-            <div key={t.name} className="border-border rounded-2xl border p-8">
-              <div className="text-ink-400 mb-5 font-mono text-xs">{t.company}</div>
-              <p className="mb-5 text-[17px] leading-[1.6]">&ldquo;{t.quote}&rdquo;</p>
-              <div className="text-sm font-semibold">{t.name}</div>
-              <div className="text-ink-450 text-[13px]">{t.title}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* FAQ */}
-      <section className="px-10 pb-[140px]">
+      <section className="px-10 py-[140px]">
         <div className="mx-auto max-w-[720px]">
           <h2 className="mb-12 text-center text-[32px] font-bold tracking-[-0.02em]">
             Frequently asked questions
@@ -285,11 +222,11 @@ export default function HomePage() {
           href="/register"
           className="bg-primary text-primary-foreground hover:bg-brand-hover mt-6 inline-block rounded-lg px-8 py-4 text-base font-semibold"
         >
-          Start free trial
+          Get started
         </Link>
         <div className="mt-4">
           <Link href="/contact" className="text-[15px]">
-            Talk to sales
+            Talk to us
           </Link>
         </div>
       </section>

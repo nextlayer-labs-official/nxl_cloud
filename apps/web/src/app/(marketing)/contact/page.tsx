@@ -19,7 +19,7 @@ export default function ContactPage() {
         </div>
       </section>
 
-      <Footer variant="simple" copyright="© 2026 Nextlayer Labs · San Francisco, CA" />
+      <Footer variant="simple" />
     </div>
   );
 }

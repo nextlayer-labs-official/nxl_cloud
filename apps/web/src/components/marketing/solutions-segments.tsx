@@ -40,7 +40,7 @@ export function SolutionsSegments() {
             <h2 className="mb-4 text-[32px] font-bold tracking-[-0.02em]">{active.headline}</h2>
             <p className="text-muted-foreground text-[17px] leading-[1.6]">{active.body}</p>
           </div>
-          <div className="mb-14 grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-3 gap-6">
             {active.benefits.map((benefit) => (
               <div
                 key={benefit.title}
@@ -50,11 +50,6 @@ export function SolutionsSegments() {
                 <p className="text-muted-foreground text-sm leading-[1.6]">{benefit.body}</p>
               </div>
             ))}
-          </div>
-          <div className="border-border-subtle bg-background mx-auto max-w-[640px] rounded-2xl border p-8">
-            <p className="mb-4 text-base leading-[1.6]">&ldquo;{active.quote}&rdquo;</p>
-            <div className="text-sm font-semibold">{active.quoteName}</div>
-            <div className="text-ink-550 text-[13px]">{active.quoteTitle}</div>
           </div>
         </div>
       </section>

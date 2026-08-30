@@ -15,11 +15,6 @@ export interface SecurityColumn {
   spec: string;
 }
 
-export interface StatEntry {
-  value: string;
-  label: string;
-}
-
 export interface PricingTierData {
   name: string;
   price: string;
@@ -30,50 +25,9 @@ export interface PricingTierData {
   featured: boolean;
 }
 
-export interface Testimonial {
-  company: string;
-  quote: string;
-  name: string;
-  title: string;
-}
-
 export interface FaqEntry {
   q: string;
   a: string;
-}
-
-export interface RawPricingTier {
-  name: string;
-  monthly: string;
-  yearly: string;
-  features: string[];
-  cta: string;
-  ctaHref: string;
-  featured: boolean;
-}
-
-export type PricingTableRow =
-  | { isGroup: true; label: string }
-  | { isGroup?: false; label: string; starter: string; business: string; enterprise: string };
-
-export interface Addon {
-  name: string;
-  desc: string;
-  price: string;
-}
-
-export interface BlogPost {
-  title: string;
-  category: string;
-  catId: string;
-  author: string;
-  date: string;
-  readTime: string;
-}
-
-export interface BlogCategory {
-  id: string;
-  label: string;
 }
 
 export interface ContactIntent {
@@ -90,23 +44,10 @@ export interface ValueItem {
   body: string;
 }
 
-export interface Leader {
-  name: string;
-  title: string;
-}
-
-export interface EnterpriseCapability {
-  title: string;
-  body: string;
-}
-
 export interface SolutionsSegment {
   id: string;
   label: string;
   headline: string;
   body: string;
   benefits: { title: string; body: string }[];
-  quote: string;
-  quoteName: string;
-  quoteTitle: string;
 }
