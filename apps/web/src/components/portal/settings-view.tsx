@@ -3,11 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, Info, Loader2 } from "lucide-react";
+import { AlertTriangle, Building2, Check, Info, Loader2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Plan, SubscriptionInfo, SubscriptionStatus, Transaction } from "@/types/portal";
+import type {
+  PartnerChangeRequest,
+  PartnerInfo,
+  Plan,
+  SubscriptionInfo,
+  SubscriptionStatus,
+  Transaction,
+} from "@/types/portal";
 import { CheckoutConfirmationModal } from "./checkout-confirmation-modal";
 import { usePortal } from "./portal-context";
 
@@ -439,6 +446,183 @@ function DeleteAccountModal({
   );
 }
 
+function PartnerCodeCard({
+  title = "Have a partner code?",
+  description = "Map your workspace to a reseller — they'll manage your plan from here on.",
+  buttonLabel = "Apply",
+  className,
+  onApply,
+  applying,
+  error,
+}: {
+  title?: string;
+  description?: string;
+  buttonLabel?: string;
+  className?: string;
+  onApply: (code: string) => void;
+  applying: boolean;
+  error: string | null;
+}) {
+  const [code, setCode] = useState("");
+  return (
+    <div
+      className={cn(
+        "border-border-subtle flex items-center justify-between gap-4 rounded-xl border px-4 py-3.5",
+        className,
+      )}
+    >
+      <div className="min-w-0">
+        <div className="text-foreground text-[13px] font-semibold">{title}</div>
+        <div className="text-ink-450 text-[12px]">{description}</div>
+        {error && <div className="text-error-text mt-1 text-[12px]">{error}</div>}
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (code.trim()) onApply(code.trim());
+        }}
+        className="flex shrink-0 items-center gap-2"
+      >
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder="PARTNER CODE"
+          className="border-input bg-background w-40 rounded-lg border px-3 py-2 text-[13px] font-mono uppercase outline-none"
+        />
+        <button
+          type="submit"
+          disabled={applying || !code.trim()}
+          className="border-input hover:bg-surface-muted flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-60"
+        >
+          {applying && <Loader2 className="h-3 w-3 animate-spin" />}
+          {buttonLabel}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/** Shown once a leave/switch request has been filed but not yet resolved — replaces the normal managed-by actions until the current partner responds. */
+function PartnerChangeRequestBanner({
+  partnerName,
+  request,
+  onCancel,
+  canceling,
+}: {
+  partnerName: string;
+  request: PartnerChangeRequest;
+  onCancel: () => void;
+  canceling: boolean;
+}) {
+  const isRejected = request.status === "REJECTED";
+  const actionDescription = request.newPartner
+    ? `switch to ${request.newPartner.name}`
+    : "leave this partner";
+
+  return (
+    <div
+      className={cn(
+        "mt-4 rounded-lg border px-4 py-3",
+        isRejected ? "border-error-border bg-error-bg" : "border-warn/30 bg-warn/10",
+      )}
+    >
+      <p className={cn("text-[13px] font-medium", isRejected ? "text-error-text" : "text-ink-700")}>
+        {isRejected
+          ? `${partnerName} declined your request to ${actionDescription}.`
+          : `Your request to ${actionDescription} is awaiting approval from ${partnerName}.`}
+      </p>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={canceling}
+        className={cn(
+          "mt-2 flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold disabled:opacity-60",
+          isRejected ? "text-error-text" : "text-ink-450 hover:text-foreground",
+        )}
+      >
+        {canceling ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+        {isRejected ? "Dismiss" : "Cancel request"}
+      </button>
+    </div>
+  );
+}
+
+function PartnerManagedNotice({
+  partner,
+  changeRequest,
+  onRequestSwitch,
+  onRequestRemoval,
+  onCancelRequest,
+  applying,
+  removing,
+  canceling,
+  switchError,
+}: {
+  partner: PartnerInfo;
+  changeRequest: PartnerChangeRequest | null;
+  onRequestSwitch: (code: string) => void;
+  onRequestRemoval: () => void;
+  onCancelRequest: () => void;
+  applying: boolean;
+  removing: boolean;
+  canceling: boolean;
+  switchError: string | null;
+}) {
+  const hasActiveRequest = changeRequest && (changeRequest.status === "PENDING" || changeRequest.status === "REJECTED");
+
+  return (
+    <div className="border-border-subtle bg-surface-muted-2 rounded-xl border p-5">
+      <div className="flex items-start gap-3">
+        <div className="bg-primary text-primary-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+          <Building2 className="h-4.5 w-4.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-foreground text-[15px] font-semibold">Managed by {partner.name}</div>
+          <p className="text-ink-450 mt-1 text-[13px]">
+            Your plan is managed by this partner — upgrades, downgrades, and billing changes go through
+            them, not this page. Contact{" "}
+            <a href={`mailto:${partner.email}`} className="text-primary underline underline-offset-2">
+              {partner.email}
+            </a>{" "}
+            to make changes.
+          </p>
+
+          {hasActiveRequest && changeRequest ? (
+            <PartnerChangeRequestBanner
+              partnerName={partner.name}
+              request={changeRequest}
+              onCancel={onCancelRequest}
+              canceling={canceling}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={onRequestRemoval}
+              disabled={removing}
+              className="text-ink-450 hover:text-error-text mt-3 flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold disabled:opacity-60"
+            >
+              {removing ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+              Request to leave this partner
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!hasActiveRequest && (
+        <PartnerCodeCard
+          title="Switch to a different partner?"
+          description={`Requesting a switch needs ${partner.name}'s approval before it takes effect.`}
+          buttonLabel="Request switch"
+          className="mt-4"
+          onApply={onRequestSwitch}
+          applying={applying}
+          error={switchError}
+        />
+      )}
+    </div>
+  );
+}
+
 export function SettingsView() {
   const { user, organization, refresh } = usePortal();
   const router = useRouter();
@@ -469,19 +653,28 @@ export function SettingsView() {
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("MONTHLY");
   const [confirmingPlan, setConfirmingPlan] = useState<Plan | null>(null);
 
+  const [applyingPartnerCode, setApplyingPartnerCode] = useState(false);
+  const [partnerCodeError, setPartnerCodeError] = useState<string | null>(null);
+  const [removingPartner, setRemovingPartner] = useState(false);
+  const [cancelingPartnerRequest, setCancelingPartnerRequest] = useState(false);
+  const [partnerChangeRequest, setPartnerChangeRequest] = useState<PartnerChangeRequest | null>(null);
+
   useEffect(() => {
     Promise.all([
       api.get<Plan[]>("/billing/plans"),
       api.get<SubscriptionInfo | null>("/billing/subscription"),
       api.get<Transaction[]>("/billing/transactions"),
       api.get<Usage>("/organizations/usage"),
+      api.get<PartnerChangeRequest | null>("/organizations/partner-change-request"),
     ])
-      .then(([plansData, subscriptionData, transactionsData, usageData]) => {
+      .then(([plansData, subscriptionData, transactionsData, usageData, changeRequestData]) => {
         setPlans(plansData);
         setSubscription(subscriptionData);
         setTransactions(transactionsData);
         setUsage(usageData);
+        setPartnerChangeRequest(changeRequestData);
       })
+      .catch(() => setBillingActionError("Couldn't load billing info — try refreshing the page."))
       .finally(() => setBillingLoading(false));
   }, []);
 
@@ -579,6 +772,47 @@ export function SettingsView() {
       );
       setBillingActionLoading(null);
       setConfirmingPlan(null);
+    }
+  }
+
+  async function handleApplyPartnerCode(code: string) {
+    setPartnerCodeError(null);
+    setApplyingPartnerCode(true);
+    try {
+      const result = await api.post<
+        { status: "mapped"; partner: PartnerInfo } | { status: "pending"; request: PartnerChangeRequest }
+      >("/organizations/partner-code", { code });
+      if (result.status === "mapped") {
+        await refresh();
+      } else {
+        setPartnerChangeRequest(result.request);
+      }
+    } catch (err) {
+      setPartnerCodeError(err instanceof ApiError ? err.message : "Couldn't apply that code.");
+    } finally {
+      setApplyingPartnerCode(false);
+    }
+  }
+
+  async function handleRemovePartnerCode() {
+    setRemovingPartner(true);
+    try {
+      const result = await api.delete<{ status: "pending"; request: PartnerChangeRequest }>(
+        "/organizations/partner-code",
+      );
+      setPartnerChangeRequest(result.request);
+    } finally {
+      setRemovingPartner(false);
+    }
+  }
+
+  async function handleCancelPartnerChangeRequest() {
+    setCancelingPartnerRequest(true);
+    try {
+      await api.delete("/organizations/partner-change-request");
+      setPartnerChangeRequest(null);
+    } finally {
+      setCancelingPartnerRequest(false);
     }
   }
 
@@ -742,6 +976,27 @@ export function SettingsView() {
               </div>
             </div>
 
+            {organization.partner ? (
+              <PartnerManagedNotice
+                partner={organization.partner}
+                changeRequest={partnerChangeRequest}
+                onRequestSwitch={handleApplyPartnerCode}
+                onRequestRemoval={handleRemovePartnerCode}
+                onCancelRequest={handleCancelPartnerChangeRequest}
+                applying={applyingPartnerCode}
+                removing={removingPartner}
+                canceling={cancelingPartnerRequest}
+                switchError={partnerCodeError}
+              />
+            ) : (
+              <>
+            <PartnerCodeCard
+              className="mb-8"
+              onApply={handleApplyPartnerCode}
+              applying={applyingPartnerCode}
+              error={partnerCodeError}
+            />
+
             {billingActionError && (
               <p className="text-error-text mb-4 text-[13px]">{billingActionError}</p>
             )}
@@ -899,6 +1154,8 @@ export function SettingsView() {
                 );
               })}
             </div>
+              </>
+            )}
 
             <div className="mt-10">
               <SubsectionLabel>Billing history</SubsectionLabel>

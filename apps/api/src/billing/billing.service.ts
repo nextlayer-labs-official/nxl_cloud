@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -120,6 +121,11 @@ export class BillingService {
    */
   async createOrder(userId: string, dto: CreateOrderDto) {
     const membership = await this.organizations.getPrimaryMembership(userId);
+    if (membership.organization.partnerId) {
+      throw new ForbiddenException(
+        "This organization's plan is managed by a partner — contact them to change your plan.",
+      );
+    }
 
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");

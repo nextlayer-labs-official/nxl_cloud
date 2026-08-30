@@ -9,11 +9,17 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from "@nestjs/common";
+import type { Request } from "express";
 import { AdminService } from "./admin.service";
+import { ChangePlanDto } from "./dto/change-plan.dto";
 import { CreateCustomerDto } from "./dto/create-customer.dto";
+import { CreatePartnerDto } from "./dto/create-partner.dto";
 import { CreatePlanDto } from "./dto/create-plan.dto";
+import { CreditPartnerWalletDto } from "./dto/credit-partner-wallet.dto";
+import { SetPartnerPlanPriceDto } from "./dto/set-partner-plan-price.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
 import { UpdateSubscriptionDto } from "./dto/update-subscription.dto";
 import { AdminSessionGuard } from "./guards/admin-session.guard";
@@ -77,6 +83,11 @@ export class AdminController {
     return this.adminService.updateSubscription(id, dto);
   }
 
+  @Patch("organizations/:id/plan")
+  changePlan(@Param("id") id: string, @Body() dto: ChangePlanDto) {
+    return this.adminService.changePlan(id, dto);
+  }
+
   @Get("plans")
   listPlans() {
     return this.adminService.listPlans();
@@ -105,5 +116,61 @@ export class AdminController {
       parsed && !Number.isNaN(parsed) ? parsed : undefined,
       organizationId,
     );
+  }
+
+  @Get("partners")
+  listPartners() {
+    return this.adminService.listPartners();
+  }
+
+  @Get("partners/:id")
+  getPartner(@Param("id") id: string) {
+    return this.adminService.getPartner(id);
+  }
+
+  @Post("partners")
+  createPartner(@Body() dto: CreatePartnerDto) {
+    return this.adminService.createPartner(dto);
+  }
+
+  @Post("partners/:id/suspend")
+  @HttpCode(HttpStatus.OK)
+  suspendPartner(@Param("id") id: string) {
+    return this.adminService.suspendPartner(id);
+  }
+
+  @Post("partners/:id/reactivate")
+  @HttpCode(HttpStatus.OK)
+  reactivatePartner(@Param("id") id: string) {
+    return this.adminService.reactivatePartner(id);
+  }
+
+  @Get("partners/:id/pricing")
+  getPartnerPricing(@Param("id") id: string) {
+    return this.adminService.getPartnerPricing(id);
+  }
+
+  @Patch("partners/:id/pricing/:planId")
+  setPartnerPlanPrice(
+    @Param("id") id: string,
+    @Param("planId") planId: string,
+    @Body() dto: SetPartnerPlanPriceDto,
+  ) {
+    return this.adminService.setPartnerPlanPrice(id, planId, dto);
+  }
+
+  @Get("partners/:id/wallet")
+  getPartnerWallet(@Param("id") id: string) {
+    return this.adminService.getPartnerWallet(id);
+  }
+
+  @Post("partners/:id/wallet/credit")
+  creditPartnerWallet(@Req() req: Request, @Param("id") id: string, @Body() dto: CreditPartnerWalletDto) {
+    return this.adminService.creditPartnerWallet(req.adminUser!.id, id, dto);
+  }
+
+  @Get("partners/:id/usage-summary")
+  getPartnerUsageSummary(@Param("id") id: string) {
+    return this.adminService.getPartnerUsageSummary(id);
   }
 }

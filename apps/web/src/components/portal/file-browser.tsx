@@ -72,20 +72,23 @@ interface UploadTask {
   progress: number;
   status: "uploading" | "done" | "error";
   error?: string;
+  /** null once known-unavailable (e.g. too little data yet); undefined before the first progress event. */
+  etaSeconds?: number | null;
+  speedBytesPerSec?: number | null;
 }
 
 /** Uses XHR (not fetch) because it's the only API that exposes upload progress events. */
 function putWithProgress(
   url: string,
   file: File,
-  onProgress: (percent: number) => void,
+  onProgress: (loaded: number, total: number) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      if (e.lengthComputable) onProgress(e.loaded, e.total);
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve();
@@ -94,6 +97,24 @@ function putWithProgress(
     xhr.onerror = () => reject(new Error(UPLOAD_FAILED_MESSAGE));
     xhr.send(file);
   });
+}
+
+/** Cumulative-average speed (bytes uploaded / time elapsed since the request started) rather than a single progress-event delta — steadier, since individual XHR progress ticks can be bursty. */
+function formatEta(seconds: number | null | undefined): string | null {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 1) return "almost done";
+  if (seconds < 60) return `${Math.ceil(seconds)}s left`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${minutes}m ${secs}s left`;
+}
+
+/** Same cumulative-average basis as formatEta — this is throughput to the storage endpoint, which stands in for the customer's effective internet speed for this transfer. */
+function formatSpeed(bytesPerSecond: number | null | undefined): string | null {
+  if (bytesPerSecond == null || !Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return null;
+  if (bytesPerSecond < 1024) return `${Math.round(bytesPerSecond)} B/s`;
+  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
 /**
@@ -315,8 +336,18 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           folderId,
         });
 
-        await putWithProgress(uploadUrl, file, (percent) => {
-          setUploads((prev) => prev.map((u) => (u.id === id ? { ...u, progress: percent } : u)));
+        const startedAt = Date.now();
+        await putWithProgress(uploadUrl, file, (loaded, total) => {
+          const percent = Math.round((loaded / total) * 100);
+          const elapsedSeconds = (Date.now() - startedAt) / 1000;
+          // Ignore the first fraction of a second — speed computed from a
+          // near-zero elapsed time is wildly unstable (could show "0s left"
+          // or several minutes for the same upload a moment later).
+          const speedBytesPerSec = loaded > 0 && elapsedSeconds > 0.5 ? loaded / elapsedSeconds : null;
+          const etaSeconds = speedBytesPerSec ? (total - loaded) / speedBytesPerSec : null;
+          setUploads((prev) =>
+            prev.map((u) => (u.id === id ? { ...u, progress: percent, etaSeconds, speedBytesPerSec } : u)),
+          );
         });
 
         await api.post("/files", {
@@ -328,7 +359,9 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
         });
 
         setUploads((prev) =>
-          prev.map((u) => (u.id === id ? { ...u, progress: 100, status: "done" } : u)),
+          prev.map((u) =>
+            u.id === id ? { ...u, progress: 100, status: "done", etaSeconds: null, speedBytesPerSec: null } : u,
+          ),
         );
         load();
       } catch (err) {
@@ -1273,7 +1306,15 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
                     ) : u.status === "error" ? (
                       <AlertCircle className="text-error-text h-4 w-4 shrink-0" />
                     ) : (
-                      <span className="text-ink-450 shrink-0 text-[12px]">{u.progress}%</span>
+                      <span className="text-ink-450 shrink-0 text-right text-[12px]">
+                        <span className="block">{u.progress}%</span>
+                        {formatSpeed(u.speedBytesPerSec) && (
+                          <span className="block whitespace-nowrap">{formatSpeed(u.speedBytesPerSec)}</span>
+                        )}
+                        {formatEta(u.etaSeconds) && (
+                          <span className="block whitespace-nowrap">{formatEta(u.etaSeconds)}</span>
+                        )}
+                      </span>
                     )}
                   </li>
                 );

@@ -7,6 +7,7 @@ import { api } from "@/lib/api-client";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AdminOrganization } from "@/types/admin";
+import { ChangePlanModal } from "./change-plan-modal";
 import { NewCustomerModal } from "./new-customer-modal";
 import { SubscriptionOverrideModal } from "./subscription-override-modal";
 
@@ -27,6 +28,7 @@ export function OrganizationsView() {
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [overrideTarget, setOverrideTarget] = useState<AdminOrganization | null>(null);
+  const [changingPlanTarget, setChangingPlanTarget] = useState<AdminOrganization | null>(null);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -167,6 +169,14 @@ export function OrganizationsView() {
                   </td>
                   <td className="px-4 py-3">
                     {org.plan ?? <span className="text-ink-450">—</span>}
+                    {org.partner && (
+                      <Link
+                        href={`/admin/partners/${org.partner.id}`}
+                        className="text-primary hover:underline block w-fit text-[12px] font-medium"
+                      >
+                        Managed by {org.partner.name}
+                      </Link>
+                    )}
                     {org.discountPercent ? (
                       <div className="text-success text-[12px] font-medium">
                         {org.discountPercent}% off
@@ -222,10 +232,17 @@ export function OrganizationsView() {
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => setOverrideTarget(org)}
+                        onClick={() => setChangingPlanTarget(org)}
                         className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
                       >
                         Change plan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOverrideTarget(org)}
+                        className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
+                      >
+                        Advanced override
                       </button>
                       <button
                         type="button"
@@ -248,6 +265,17 @@ export function OrganizationsView() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {changingPlanTarget && (
+        <ChangePlanModal
+          organization={changingPlanTarget}
+          onClose={() => setChangingPlanTarget(null)}
+          onSaved={() => {
+            setChangingPlanTarget(null);
+            load();
+          }}
+        />
       )}
 
       {overrideTarget && (

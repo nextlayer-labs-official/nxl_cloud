@@ -8,11 +8,31 @@ export interface PortalUser {
 
 export type MembershipRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
 
+export interface PartnerInfo {
+  id: string;
+  name: string;
+  code: string;
+  email: string;
+}
+
 export interface PortalOrganization {
   id: string;
   name: string;
   slug: string;
   role: MembershipRole;
+  /** Non-null once mapped to a reseller — while set, self-serve checkout (billing.service.ts createOrder) is locked and only this partner or a platform admin can change the plan. */
+  partner: PartnerInfo | null;
+}
+
+export type PartnerChangeRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+/** A filed request to leave (newPartner: null) or switch away from the org's current partner — needs that partner's approval, doesn't apply on its own. */
+export interface PartnerChangeRequest {
+  id: string;
+  status: PartnerChangeRequestStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+  newPartner: PartnerInfo | null;
 }
 
 export interface FolderItem {

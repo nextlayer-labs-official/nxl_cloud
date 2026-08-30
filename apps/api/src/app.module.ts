@@ -8,6 +8,7 @@ import { FilesModule } from "./files/files.module";
 import { FoldersModule } from "./folders/folders.module";
 import { HealthModule } from "./health/health.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
+import { PartnerModule } from "./partner/partner.module";
 import { ShareModule } from "./share/share.module";
 import { StorageModule } from "./storage/storage.module";
 
@@ -22,6 +23,7 @@ import { StorageModule } from "./storage/storage.module";
     ShareModule,
     BillingModule,
     AdminModule,
+    PartnerModule,
   ],
   controllers: [AppController],
   providers: [AppService],

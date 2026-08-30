@@ -14,6 +14,7 @@ type LoadState = { status: "loading" } | { status: "ready"; adminUser: AdminUser
 const NAV_LINKS = [
   { href: "/admin", label: "Overview" },
   { href: "/admin/organizations", label: "Organizations" },
+  { href: "/admin/partners", label: "Partners" },
   { href: "/admin/plans", label: "Plans" },
   { href: "/admin/audit-log", label: "Audit Log" },
 ];

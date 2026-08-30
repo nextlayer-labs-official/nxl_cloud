@@ -1,11 +1,15 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { prisma } from "@nextlayer/database";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { prisma, type BillingCycle } from "@nextlayer/database";
 import { hashPassword } from "../auth/password.util";
 import { sendVerificationEmailFor } from "../auth/verification-token.util";
 import { EmailService } from "../email/email.service";
 import { uniqueOrgSlug } from "../organizations/slug.util";
+import type { ChangePlanDto } from "./dto/change-plan.dto";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
+import type { CreatePartnerDto } from "./dto/create-partner.dto";
 import type { CreatePlanDto } from "./dto/create-plan.dto";
+import type { CreditPartnerWalletDto } from "./dto/credit-partner-wallet.dto";
+import type { SetPartnerPlanPriceDto } from "./dto/set-partner-plan-price.dto";
 import type { UpdatePlanDto } from "./dto/update-plan.dto";
 import type { UpdateSubscriptionDto } from "./dto/update-subscription.dto";
 
@@ -14,6 +18,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // monthly period instead — mirrors AuthService.register exactly, since an
 // admin-created account should behave identically to a real self-serve signup.
 const MONTHLY_PERIOD_MS = 30 * DAY_MS;
+const PERIOD_MS: Record<BillingCycle, number> = { MONTHLY: MONTHLY_PERIOD_MS, ANNUAL: 365 * DAY_MS };
+const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 @Injectable()
 export class AdminService {
@@ -67,6 +73,7 @@ export class AdminService {
             include: { user: true },
           },
           subscription: { include: { plan: true } },
+          partner: { select: { id: true, name: true, code: true } },
           _count: { select: { memberships: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -100,6 +107,7 @@ export class AdminService {
       planStorageLimitGb: org.subscription?.plan.storageLimitGb ?? null,
       creditBalanceCents: org.subscription?.creditBalanceCents ?? 0,
       storageUsedBytes: usageByOrg.get(org.id) ?? 0,
+      partner: org.partner,
     }));
   }
 
@@ -119,16 +127,23 @@ export class AdminService {
   }
 
   async getOrganization(id: string) {
-    const [organization, storageUsage] = await Promise.all([
+    const [organization, storageUsage, trashUsage] = await Promise.all([
       prisma.organization.findUnique({
         where: { id },
         include: {
           memberships: { include: { user: true }, orderBy: { createdAt: "asc" } },
           subscription: { include: { plan: true } },
+          partner: { select: { id: true, name: true, code: true, email: true } },
         },
       }),
       prisma.file.aggregate({
         where: { organizationId: id, deletedAt: null },
+        _sum: { sizeBytes: true },
+      }),
+      // Soft-deleted files still sit in S3 (and still cost us) until permanently
+      // purged from this org's trash — see AdminService.getOverview's own comment.
+      prisma.file.aggregate({
+        where: { organizationId: id, deletedAt: { not: null } },
         _sum: { sizeBytes: true },
       }),
     ]);
@@ -188,10 +203,12 @@ export class AdminService {
       createdAt: organization.createdAt,
       suspendedAt: organization.suspendedAt,
       storageUsedBytes: storageUsage._sum.sizeBytes ?? 0,
+      storageTrashedBytes: trashUsage._sum.sizeBytes ?? 0,
       fileCount: fileIds.length,
       folderCount: folderIds.length,
       sharedByOrgCount,
       sharedIntoOrgCount,
+      partner: organization.partner,
       members: organization.memberships.map((m) => ({
         id: m.user.id,
         name: m.user.name,
@@ -347,6 +364,62 @@ export class AdminService {
     });
   }
 
+  /**
+   * The simple, rule-following plan change — same upgrade/downgrade thumb
+   * rule BillingService/PartnerService use elsewhere: a mid-cycle downgrade
+   * is refused outright until the current period ends; anything else (a
+   * genuine upgrade, a first assignment, a renewal, or a change made after
+   * the period already lapsed) applies immediately with a fresh period. No
+   * payment moves here — admin actions never charge anyone. For discounts,
+   * comps, backdating, or forcing an immediate downgrade (e.g. a refund
+   * case), use `updateSubscription` (the advanced override) instead.
+   */
+  async changePlan(id: string, dto: ChangePlanDto) {
+    await this.requireOrganization(id);
+    const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
+    if (!plan) throw new NotFoundException("Plan not found.");
+
+    const existing = await prisma.subscription.findUnique({
+      where: { organizationId: id },
+      include: { plan: true },
+    });
+    const isPlanChange = !!existing && existing.plan.id !== plan.id;
+    const hasActivePeriod =
+      existing?.status === "ACTIVE" && !!existing.currentPeriodEnd && existing.currentPeriodEnd > new Date();
+
+    if (isPlanChange && hasActivePeriod) {
+      const cycle = existing!.billingCycle;
+      const oldPrice = cycle === "ANNUAL" ? existing!.plan.priceYearlyCents : existing!.plan.priceMonthlyCents;
+      const newPrice = cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+      const isUpgrade = (newPrice ?? 0) > (oldPrice ?? 0);
+
+      if (!isUpgrade) {
+        const readableDate = existing!.currentPeriodEnd!.toISOString().slice(0, 10);
+        throw new BadRequestException(
+          `This is a downgrade — it can only take effect once the current plan ends on ${readableDate}. Use the advanced override to force it immediately instead.`,
+        );
+      }
+    }
+
+    return prisma.subscription.upsert({
+      where: { organizationId: id },
+      create: {
+        organizationId: id,
+        planId: plan.id,
+        billingCycle: dto.billingCycle,
+        status: "ACTIVE",
+        currentPeriodEnd: new Date(Date.now() + PERIOD_MS[dto.billingCycle]),
+      },
+      update: {
+        planId: plan.id,
+        billingCycle: dto.billingCycle,
+        status: "ACTIVE",
+        currentPeriodEnd: new Date(Date.now() + PERIOD_MS[dto.billingCycle]),
+      },
+      include: { plan: true },
+    });
+  }
+
   async listPlans() {
     return prisma.plan.findMany({ orderBy: { createdAt: "asc" } });
   }
@@ -437,6 +510,7 @@ export class AdminService {
       suspendedOrganizations,
       totalUsers,
       storageAgg,
+      trashAgg,
       subscriptionsByStatus,
       activeSubscriptions,
       revenueAllTimeAgg,
@@ -448,6 +522,10 @@ export class AdminService {
       prisma.organization.count({ where: { suspendedAt: { not: null } } }),
       prisma.user.count(),
       prisma.file.aggregate({ where: { deletedAt: null }, _sum: { sizeBytes: true } }),
+      // Soft-deleted files still sit in S3 (and still cost us) until permanently
+      // purged from trash — tracked separately since it's real spend that
+      // doesn't count toward any customer's active quota.
+      prisma.file.aggregate({ where: { deletedAt: { not: null } }, _sum: { sizeBytes: true } }),
       prisma.subscription.groupBy({ by: ["status"], _count: true }),
       prisma.subscription.findMany({
         where: { status: "ACTIVE" },
@@ -487,6 +565,7 @@ export class AdminService {
       },
       totalUsers,
       totalStorageUsedBytes: storageAgg._sum.sizeBytes ?? 0,
+      totalTrashedBytes: trashAgg._sum.sizeBytes ?? 0,
       subscriptionsByStatus: statusCounts,
       estimatedMrrCents,
       revenue: {
@@ -508,4 +587,231 @@ export class AdminService {
       },
     });
   }
+
+  // --- Partners (resellers) ---
+
+  async createPartner(dto: CreatePartnerDto) {
+    const email = dto.email.toLowerCase().trim();
+    const code = dto.code.trim();
+    const [existingEmail, existingCode] = await Promise.all([
+      prisma.partner.findUnique({ where: { email } }),
+      prisma.partner.findUnique({ where: { code } }),
+    ]);
+    if (existingEmail) throw new ConflictException("A partner with this email already exists.");
+    if (existingCode) throw new ConflictException("That partner code is already taken.");
+
+    const passwordHash = await hashPassword(dto.password);
+    const partner = await prisma.partner.create({
+      data: { name: dto.name, email, code, passwordHash },
+    });
+    return { id: partner.id, name: partner.name, email: partner.email, code: partner.code };
+  }
+
+  async listPartners() {
+    const partners = await prisma.partner.findMany({
+      orderBy: { createdAt: "asc" },
+      include: { _count: { select: { organizations: true } } },
+    });
+    return partners.map((p) => ({
+      id: p.id,
+      name: p.name,
+      email: p.email,
+      code: p.code,
+      suspendedAt: p.suspendedAt,
+      createdAt: p.createdAt,
+      organizationCount: p._count.organizations,
+      walletBalanceCents: p.walletBalanceCents,
+    }));
+  }
+
+  private async requirePartner(id: string) {
+    const partner = await prisma.partner.findUnique({ where: { id } });
+    if (!partner) throw new NotFoundException("Partner not found.");
+    return partner;
+  }
+
+  /** null = unlimited. Mirrors OrganizationsService/PartnerService's own copy — an admin-set `storageLimitGbOverride` wins over the plan's own default. */
+  private effectiveLimitBytes(
+    subscription: { storageLimitGbOverride: number | null; plan: { storageLimitGb: number | null } } | null,
+  ): number | null {
+    const gb = subscription?.storageLimitGbOverride ?? subscription?.plan.storageLimitGb ?? null;
+    return gb !== null ? gb * BYTES_PER_GB : null;
+  }
+
+  async getPartner(id: string) {
+    const partner = await this.requirePartner(id);
+    const organizations = await prisma.organization.findMany({
+      where: { partnerId: id },
+      include: { subscription: { include: { plan: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const usage = organizations.length
+      ? await prisma.file.groupBy({
+          by: ["organizationId"],
+          where: { organizationId: { in: organizations.map((o) => o.id) }, deletedAt: null },
+          _sum: { sizeBytes: true },
+        })
+      : [];
+    const usedByOrg = new Map(usage.map((u) => [u.organizationId, u._sum.sizeBytes ?? 0]));
+
+    return {
+      id: partner.id,
+      name: partner.name,
+      email: partner.email,
+      code: partner.code,
+      suspendedAt: partner.suspendedAt,
+      createdAt: partner.createdAt,
+      walletBalanceCents: partner.walletBalanceCents,
+      organizations: organizations.map((org) => ({
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        subscription: org.subscription,
+        storageUsedBytes: usedByOrg.get(org.id) ?? 0,
+        storageLimitBytes: this.effectiveLimitBytes(org.subscription),
+      })),
+    };
+  }
+
+  async suspendPartner(id: string) {
+    await this.requirePartner(id);
+    return prisma.partner.update({ where: { id }, data: { suspendedAt: new Date() } });
+  }
+
+  async reactivatePartner(id: string) {
+    await this.requirePartner(id);
+    return prisma.partner.update({ where: { id }, data: { suspendedAt: null } });
+  }
+
+  /**
+   * Rolls up storage quota vs. usage across every customer mapped to this
+   * partner — quota is the sum of each org's effective plan limit (an
+   * admin-set override, else the plan's own storageLimitGb); orgs on an
+   * unlimited plan contribute no finite quota, so they're counted
+   * separately (`unlimitedCount`) rather than silently skewing the total.
+   */
+  async getPartnerUsageSummary(partnerId: string) {
+    await this.requirePartner(partnerId);
+    const orgs = await prisma.organization.findMany({
+      where: { partnerId },
+      select: { id: true, subscription: { include: { plan: true } } },
+    });
+    const usage = orgs.length
+      ? await prisma.file.groupBy({
+          by: ["organizationId"],
+          where: { organizationId: { in: orgs.map((o) => o.id) }, deletedAt: null },
+          _sum: { sizeBytes: true },
+        })
+      : [];
+    const usedByOrg = new Map(usage.map((u) => [u.organizationId, u._sum.sizeBytes ?? 0]));
+
+    let totalQuotaBytes = 0;
+    let totalUsedBytes = 0;
+    let unlimitedCount = 0;
+    for (const org of orgs) {
+      totalUsedBytes += usedByOrg.get(org.id) ?? 0;
+      const limitBytes = this.effectiveLimitBytes(org.subscription);
+      if (limitBytes === null) unlimitedCount += 1;
+      else totalQuotaBytes += limitBytes;
+    }
+
+    return {
+      customerCount: orgs.length,
+      totalQuotaBytes,
+      totalUsedBytes,
+      totalFreeBytes: Math.max(0, totalQuotaBytes - totalUsedBytes),
+      unlimitedCount,
+    };
+  }
+
+  /** Manual top-up against payment collected outside the platform — `note` carries the reference (bank txn id, cheque number, etc.). */
+  async creditPartnerWallet(adminId: string, partnerId: string, dto: CreditPartnerWalletDto) {
+    await this.requirePartner(partnerId);
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.partner.update({
+        where: { id: partnerId },
+        data: { walletBalanceCents: { increment: dto.amountCents } },
+      });
+      await tx.partnerWalletTransaction.create({
+        data: {
+          partnerId,
+          type: "CREDIT",
+          amountCents: dto.amountCents,
+          balanceAfterCents: updated.walletBalanceCents,
+          note: dto.note?.trim() || null,
+          createdById: adminId,
+        },
+      });
+      return { walletBalanceCents: updated.walletBalanceCents };
+    });
+  }
+
+  /** Balance + recent transaction history — both admin's manual credits and the partner's own activation/change debits. */
+  async getPartnerWallet(partnerId: string) {
+    const partner = await this.requirePartner(partnerId);
+    const transactions = await prisma.partnerWalletTransaction.findMany({
+      where: { partnerId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        createdBy: { select: { name: true, email: true } },
+        organization: { select: { name: true, slug: true } },
+        plan: { select: { name: true } },
+      },
+    });
+    return { balanceCents: partner.walletBalanceCents, transactions };
+  }
+
+  /** Every plan alongside this partner's negotiated price, if any — null override fields mean "uses the plan's own list price". */
+  async getPartnerPricing(partnerId: string) {
+    await this.requirePartner(partnerId);
+    const [plans, prices] = await Promise.all([
+      prisma.plan.findMany({ orderBy: { createdAt: "asc" } }),
+      prisma.partnerPlanPrice.findMany({ where: { partnerId } }),
+    ]);
+    const priceByPlanId = new Map(prices.map((p) => [p.planId, p]));
+    return plans.map((plan) => {
+      const override = priceByPlanId.get(plan.id);
+      return {
+        planId: plan.id,
+        planName: plan.name,
+        listPriceMonthlyCents: plan.priceMonthlyCents,
+        listPriceYearlyCents: plan.priceYearlyCents,
+        partnerPriceMonthlyCents: override?.priceMonthlyCents ?? null,
+        partnerPriceYearlyCents: override?.priceYearlyCents ?? null,
+      };
+    });
+  }
+
+  /** Both fields null/omitted clears the override — the plan falls back to its own list price for this partner. */
+  async setPartnerPlanPrice(partnerId: string, planId: string, dto: SetPartnerPlanPriceDto) {
+    await this.requirePartner(partnerId);
+    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (!plan) throw new NotFoundException("Plan not found.");
+
+    if (dto.priceMonthlyCents == null && dto.priceYearlyCents == null) {
+      await prisma.partnerPlanPrice.deleteMany({ where: { partnerId, planId } });
+      return { planId, partnerPriceMonthlyCents: null, partnerPriceYearlyCents: null };
+    }
+
+    const saved = await prisma.partnerPlanPrice.upsert({
+      where: { partnerId_planId: { partnerId, planId } },
+      create: {
+        partnerId,
+        planId,
+        priceMonthlyCents: dto.priceMonthlyCents ?? null,
+        priceYearlyCents: dto.priceYearlyCents ?? null,
+      },
+      update: {
+        priceMonthlyCents: dto.priceMonthlyCents ?? null,
+        priceYearlyCents: dto.priceYearlyCents ?? null,
+      },
+    });
+    return {
+      planId,
+      partnerPriceMonthlyCents: saved.priceMonthlyCents,
+      partnerPriceYearlyCents: saved.priceYearlyCents,
+    };
+  }
+
 }

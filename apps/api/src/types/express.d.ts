@@ -12,11 +12,19 @@ export interface AdminSessionUser {
   name: string;
 }
 
+export interface PartnerSessionUser {
+  id: string;
+  email: string;
+  name: string;
+  code: string;
+}
+
 declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
       adminUser?: AdminSessionUser;
+      partner?: PartnerSessionUser;
     }
   }
 }

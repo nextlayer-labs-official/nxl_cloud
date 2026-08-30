@@ -54,6 +54,12 @@ enum TokenPurpose {
   PASSWORD_RESET
 }
 
+enum PartnerChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum AccessRequestStatus {
   PENDING
   GRANTED
@@ -109,18 +115,28 @@ model Organization {
   slug        String    @unique
   region      String?
   suspendedAt DateTime?
+  /// Set once the org owner maps in a partner's code (Settings) — that first
+  /// mapping applies immediately since no existing partner relationship is
+  /// being disturbed. While set, self-serve billing (BillingService.createOrder)
+  /// is locked — only that partner (via the partner portal) or platform admin
+  /// can change the plan. Leaving or switching away from an existing mapping is
+  /// NOT immediate — see PartnerChangeRequest.
+  partnerId   String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  memberships   Membership[]
-  teams         Team[]
-  folders       Folder[]
-  files         File[]
-  auditLogs     AuditLog[]
-  subscription  Subscription?
-  payments      Payment[]
-  ssoConnection SsoConnection?
-  stars         Star[]
+  memberships          Membership[]
+  teams                Team[]
+  folders              Folder[]
+  files                File[]
+  auditLogs            AuditLog[]
+  subscription         Subscription?
+  payments             Payment[]
+  ssoConnection        SsoConnection?
+  stars                Star[]
+  partner              Partner?                   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  partnerChangeRequest PartnerChangeRequest?
+  partnerWalletDebits  PartnerWalletTransaction[]
 }
 
 model Membership {
@@ -373,7 +389,8 @@ model AdminUser {
   passwordHash String
   createdAt    DateTime @default(now())
 
-  sessions AdminSession[]
+  sessions             AdminSession[]
+  partnerWalletCredits PartnerWalletTransaction[]
 }
 
 model AdminSession {
@@ -388,6 +405,130 @@ model AdminSession {
   adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
 
   @@index([adminUserId])
+}
+
+/// A reseller/channel partner (Zoho-style) — has its own login (own portal,
+/// own session, deliberately decoupled from both customer Users and platform
+/// AdminUsers, same reasoning as AdminUser's own doc comment) and a unique
+/// `code` customers enter in Settings to map their org to them. Once mapped,
+/// only this partner (via their portal) or a platform admin can change that
+/// org's plan — the org's own self-serve checkout is locked.
+model Partner {
+  id                 String    @id @default(cuid())
+  name               String
+  code               String    @unique
+  email              String    @unique
+  passwordHash       String
+  suspendedAt        DateTime?
+  /// Prepaid balance, manually topped up by admin (PartnerWalletTransaction
+  /// CREDIT rows) against payment collected outside the platform (bank
+  /// transfer, cheque, etc.) — no payment gateway involved. Activating a
+  /// customer's first plan or changing an already-active one debits this,
+  /// same upgrade/downgrade proration rule as BillingService's customer
+  /// checkout (see PartnerService for the mirrored logic). Never goes
+  /// negative — every debit is guarded against the balance at write time.
+  walletBalanceCents Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  sessions           PartnerSession[]
+  organizations      Organization[]
+  /// Requests to leave/switch away FROM this partner — this partner is the one who must approve.
+  releaseRequests    PartnerChangeRequest[]     @relation("PartnerChangeRequestCurrent")
+  /// Requests to switch TO this partner (initiated by a customer already mapped elsewhere).
+  incomingRequests   PartnerChangeRequest[]     @relation("PartnerChangeRequestNew")
+  /// Admin-negotiated per-plan pricing for this partner — see PartnerPlanPrice.
+  planPrices         PartnerPlanPrice[]
+  walletTransactions PartnerWalletTransaction[]
+}
+
+enum PartnerWalletTransactionType {
+  CREDIT
+  DEBIT
+}
+
+/// One row per wallet movement — a manual admin top-up (CREDIT, `createdBy` +
+/// `note` carry the "transaction details": who added it and why, e.g. a bank
+/// reference) or an automatic debit when a partner activates/changes a
+/// customer's plan (DEBIT, `organization` + `plan` say what it was for).
+/// `balanceAfterCents` snapshots the running balance right after this row, so
+/// history renders without re-summing every prior row.
+model PartnerWalletTransaction {
+  id                String                       @id @default(cuid())
+  partnerId         String
+  type              PartnerWalletTransactionType
+  amountCents       Int
+  balanceAfterCents Int
+  note              String?
+  createdById       String?
+  organizationId    String?
+  planId            String?
+  createdAt         DateTime                     @default(now())
+
+  partner      Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  createdBy    AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  plan         Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([partnerId, createdAt])
+}
+
+/// Admin-set, per-(partner, plan) negotiated pricing — distinct from Plan's own
+/// customer-facing price. Read by PartnerService when resolving what a plan
+/// change actually debits from the partner's wallet; purely informational
+/// beyond that. A plan with no row here for a given partner has no special
+/// pricing set yet, and falls back to the plan's own list price.
+model PartnerPlanPrice {
+  id                String   @id @default(cuid())
+  partnerId         String
+  planId            String
+  priceMonthlyCents Int?
+  priceYearlyCents  Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  plan    Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, planId])
+}
+
+/// A customer's request to leave (or switch away from) their CURRENT partner
+/// mapping. Unlike applying a code for the first time (Organization.partnerId's
+/// comment — that's immediate), releasing or changing an existing mapping needs
+/// the current partner's sign-off before it takes effect, since the partner has
+/// a commercial relationship at stake. `newPartnerId` is null for a plain
+/// removal request, set when the customer asked to switch straight to a
+/// different partner's code. One row per org (like AccessRequest's per-requester
+/// row) — re-requesting after a resolved request resets it back to PENDING.
+model PartnerChangeRequest {
+  id               String                     @id @default(cuid())
+  organizationId   String                     @unique
+  currentPartnerId String
+  newPartnerId     String?
+  status           PartnerChangeRequestStatus @default(PENDING)
+  resolvedAt       DateTime?
+  createdAt        DateTime                   @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  currentPartner Partner      @relation("PartnerChangeRequestCurrent", fields: [currentPartnerId], references: [id], onDelete: Cascade)
+  newPartner     Partner?     @relation("PartnerChangeRequestNew", fields: [newPartnerId], references: [id], onDelete: Cascade)
+
+  @@index([currentPartnerId, status])
+}
+
+model PartnerSession {
+  id           String   @id @default(cuid())
+  partnerId    String
+  sessionToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
 }
 
 /// Mirrors the 3 Pricing page tiers (Starter/Business/Enterprise).
@@ -416,8 +557,10 @@ model Plan {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  subscriptions Subscription[]
-  payments      Payment[]
+  subscriptions       Subscription[]
+  payments            Payment[]
+  partnerPrices       PartnerPlanPrice[]
+  partnerWalletDebits PartnerWalletTransaction[]
 }
 
 model Subscription {

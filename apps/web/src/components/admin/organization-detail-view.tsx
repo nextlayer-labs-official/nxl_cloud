@@ -12,6 +12,7 @@ import type {
   AdminTransaction,
 } from "@/types/admin";
 import { humanizeAuditAction } from "./audit-action-labels";
+import { ChangePlanModal } from "./change-plan-modal";
 import { SubscriptionOverrideModal } from "./subscription-override-modal";
 
 function formatDateTime(iso: string): string {
@@ -33,6 +34,7 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [overriding, setOverriding] = useState(false);
+  const [changingPlan, setChangingPlan] = useState(false);
   const [tab, setTab] = useState<DetailTab>("overview");
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [resentId, setResentId] = useState<string | null>(null);
@@ -119,6 +121,14 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
           <p className="text-ink-450 text-sm">{org.slug}</p>
         </div>
         <div className="flex items-center gap-2">
+          {org.partner && (
+            <Link
+              href={`/admin/partners/${org.partner.id}`}
+              className="bg-accent text-accent-foreground rounded-full px-2.5 py-1 text-[12px] font-semibold hover:underline"
+            >
+              Managed by {org.partner.name}
+            </Link>
+          )}
           <span
             className={cn(
               "rounded-full px-2.5 py-1 text-[12px] font-semibold",
@@ -184,6 +194,14 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
             </div>
           </div>
           <div className="border-border-subtle rounded-xl border p-4">
+            <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">
+              Deleted (still billed)
+            </div>
+            <div className="text-foreground mt-1 text-[15px] font-semibold">
+              {formatBytes(org.storageTrashedBytes)}
+            </div>
+          </div>
+          <div className="border-border-subtle rounded-xl border p-4">
             <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Files</div>
             <div className="text-foreground mt-1 text-[15px] font-semibold">{org.fileCount}</div>
           </div>
@@ -195,14 +213,32 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
           <div className="border-border-subtle rounded-xl border p-5 sm:col-span-3">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-foreground text-[15px] font-semibold">Subscription</h2>
-              <button
-                type="button"
-                onClick={() => setOverriding(true)}
-                className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
-              >
-                Change plan
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setChangingPlan(true)}
+                  className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
+                >
+                  Change plan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOverriding(true)}
+                  className="border-input hover:bg-surface-muted cursor-pointer rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
+                >
+                  Advanced override
+                </button>
+              </div>
             </div>
+            {org.partner && (
+              <p className="text-ink-450 mb-3 text-[12px]">
+                Self-serve checkout is locked while mapped to{" "}
+                <Link href={`/admin/partners/${org.partner.id}`} className="text-primary hover:underline">
+                  {org.partner.name}
+                </Link>{" "}
+                ({org.partner.email}) — the buttons above still work for admin changes.
+              </p>
+            )}
             {org.subscription ? (
               <div className="flex flex-col gap-1 text-[13px]">
                 <div className="text-foreground font-semibold">
@@ -386,6 +422,28 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
             </div>
           )}
         </div>
+      )}
+
+      {changingPlan && (
+        <ChangePlanModal
+          organization={{
+            id: org.id,
+            name: org.name,
+            plan: org.subscription?.plan.name ?? null,
+            billingCycle: org.subscription?.billingCycle ?? null,
+            subscriptionStatus: org.subscription?.status ?? null,
+            currentPeriodEnd: org.subscription?.currentPeriodEnd ?? null,
+            discountPercent: org.subscription?.discountPercent ?? null,
+            freeUntil: org.subscription?.freeUntil ?? null,
+            storageLimitGbOverride: org.subscription?.storageLimitGbOverride ?? null,
+            creditBalanceCents: org.subscription?.creditBalanceCents ?? 0,
+          }}
+          onClose={() => setChangingPlan(false)}
+          onSaved={() => {
+            setChangingPlan(false);
+            load();
+          }}
+        />
       )}
 
       {overriding && (

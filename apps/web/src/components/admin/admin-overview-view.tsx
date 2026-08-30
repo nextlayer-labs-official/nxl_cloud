@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Building2, HardDrive, IndianRupee, TrendingUp, UserPlus, Users } from "lucide-react";
+import { Building2, HardDrive, IndianRupee, Trash2, TrendingUp, UserPlus, Users } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -90,7 +90,7 @@ export function AdminOverviewView() {
 
       <div className="mb-8">
         <h2 className="text-ink-450 mb-3 text-xs font-semibold tracking-wide uppercase">Growth</h2>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           <Card
             icon={Building2}
             label="Organizations"
@@ -99,6 +99,12 @@ export function AdminOverviewView() {
           />
           <Card icon={Users} label="Users" value={String(overview.totalUsers)} />
           <Card icon={HardDrive} label="Storage used" value={formatBytes(overview.totalStorageUsedBytes)} />
+          <Card
+            icon={Trash2}
+            label="Deleted (still billed)"
+            value={formatBytes(overview.totalTrashedBytes)}
+            hint="Soft-deleted files still in S3 until purged from trash"
+          />
           <Card
             icon={UserPlus}
             label="New orgs (30d)"

@@ -24,7 +24,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+
+  // A controller returning `null` (e.g. "no subscription yet", "no pending
+  // request") makes Express send a genuinely empty body, not the text
+  // "null" — `res.json()` throws SyntaxError on that. Read as text first so
+  // an empty response resolves to `null` instead of rejecting the caller.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 export const api = {

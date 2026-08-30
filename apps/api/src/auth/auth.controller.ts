@@ -68,7 +68,10 @@ export class AuthController {
   @Get("me")
   @UseGuards(SessionGuard)
   async me(@Req() req: Request) {
-    const membership = await this.organizations.getPrimaryMembership(req.user!.id);
+    const [membership, partner] = await Promise.all([
+      this.organizations.getPrimaryMembership(req.user!.id),
+      this.organizations.getPartner(req.user!.id),
+    ]);
     return {
       user: req.user,
       organization: {
@@ -76,6 +79,7 @@ export class AuthController {
         name: membership.organization.name,
         slug: membership.organization.slug,
         role: membership.role,
+        partner,
       },
     };
   }
