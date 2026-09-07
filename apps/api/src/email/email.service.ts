@@ -123,4 +123,34 @@ export class EmailService {
       `<p>Hi,</p><p>Your request for access to the ${resourceType} "${resourceName}" was declined.</p>`,
     );
   }
+
+  /** Sent to the CURRENT partner when a mapped customer files a request to leave or switch away — needs their approve/reject in the partner portal. */
+  async sendPartnerChangeRequestEmail(to: string, organizationName: string, actionDescription: string, link: string) {
+    await this.send(
+      to,
+      `${organizationName} wants to ${actionDescription} — Nextlayer Cloud`,
+      `Hi,\n\n${organizationName} has asked to ${actionDescription}. Review it in your partner portal:\n${link}`,
+      `<p>Hi,</p><p>${organizationName} has asked to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
+    );
+  }
+
+  /** Sent to the customer once their leave/switch request is approved. */
+  async sendPartnerChangeApprovedEmail(to: string, partnerName: string, actionDescription: string, link: string) {
+    await this.send(
+      to,
+      `Your request was approved — Nextlayer Cloud`,
+      `Hi,\n\n${partnerName} approved your request to ${actionDescription}.\n\n${link}`,
+      `<p>Hi,</p><p>${partnerName} approved your request to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
+    );
+  }
+
+  /** Sent to the customer if their leave/switch request is declined — the mapping stays as it was. */
+  async sendPartnerChangeRejectedEmail(to: string, partnerName: string, actionDescription: string, link: string) {
+    await this.send(
+      to,
+      `Your request was declined — Nextlayer Cloud`,
+      `Hi,\n\n${partnerName} declined your request to ${actionDescription}.\n\n${link}`,
+      `<p>Hi,</p><p>${partnerName} declined your request to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
+    );
+  }
 }

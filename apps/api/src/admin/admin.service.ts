@@ -59,7 +59,12 @@ export class AdminService {
           },
         });
       }
-      return { id: organization.id, name: organization.name, slug: organization.slug };
+      return {
+        id: organization.id,
+        customerNumber: organization.customerNumber,
+        name: organization.name,
+        slug: organization.slug,
+      };
     });
   }
 
@@ -89,6 +94,7 @@ export class AdminService {
 
     return organizations.map((org) => ({
       id: org.id,
+      customerNumber: org.customerNumber,
       name: org.name,
       slug: org.slug,
       createdAt: org.createdAt,
@@ -198,6 +204,7 @@ export class AdminService {
 
     return {
       id: organization.id,
+      customerNumber: organization.customerNumber,
       name: organization.name,
       slug: organization.slug,
       createdAt: organization.createdAt,
@@ -384,8 +391,12 @@ export class AdminService {
       include: { plan: true },
     });
     const isPlanChange = !!existing && existing.plan.id !== plan.id;
+    // TRIALING counts as "mid-cycle" too — a downgrade shouldn't cut a trial
+    // short just because no payment has actually been collected yet.
     const hasActivePeriod =
-      existing?.status === "ACTIVE" && !!existing.currentPeriodEnd && existing.currentPeriodEnd > new Date();
+      (existing?.status === "ACTIVE" || existing?.status === "TRIALING") &&
+      !!existing.currentPeriodEnd &&
+      existing.currentPeriodEnd > new Date();
 
     if (isPlanChange && hasActivePeriod) {
       const cycle = existing!.billingCycle;
@@ -664,6 +675,7 @@ export class AdminService {
       walletBalanceCents: partner.walletBalanceCents,
       organizations: organizations.map((org) => ({
         id: org.id,
+        customerNumber: org.customerNumber,
         name: org.name,
         slug: org.slug,
         subscription: org.subscription,

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Plus } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { formatBytes, formatDate } from "@/lib/format";
+import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   AdminPartnerDetail,
@@ -291,7 +291,7 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
                   >
                     <div className="min-w-0">
                       <div className="text-foreground font-semibold">{org.name}</div>
-                      <div className="text-ink-450">{org.slug}</div>
+                      <div className="text-ink-450">{formatCustomerCode(org.customerNumber)} · {org.slug}</div>
                     </div>
                     <div className="text-ink-450 shrink-0">
                       {formatBytes(org.storageUsedBytes)} /{" "}

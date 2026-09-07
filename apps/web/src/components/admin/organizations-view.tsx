@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, Plus, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { formatBytes, formatDate } from "@/lib/format";
+import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AdminOrganization } from "@/types/admin";
 import { ChangePlanModal } from "./change-plan-modal";
@@ -153,7 +153,9 @@ export function OrganizationsView() {
                       </div>
                       <div className="min-w-0">
                         <div className="text-foreground truncate font-semibold hover:underline">{org.name}</div>
-                        <div className="text-ink-450 truncate text-[12px]">{org.slug}</div>
+                        <div className="text-ink-450 truncate text-[12px]">
+                          {formatCustomerCode(org.customerNumber)} · {org.slug}
+                        </div>
                       </div>
                     </Link>
                   </td>

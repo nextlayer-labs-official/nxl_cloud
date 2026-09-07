@@ -8,6 +8,7 @@ export type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED"
 
 export interface AdminOrganization {
   id: string;
+  customerNumber: number;
   name: string;
   slug: string;
   createdAt: string;
@@ -48,6 +49,7 @@ export interface AdminPendingAccessRequest {
 
 export interface AdminOrganizationDetail {
   id: string;
+  customerNumber: number;
   name: string;
   slug: string;
   createdAt: string;
@@ -139,6 +141,7 @@ export interface AdminPartnerDetail {
   walletBalanceCents: number;
   organizations: {
     id: string;
+    customerNumber: number;
     name: string;
     slug: string;
     subscription: {

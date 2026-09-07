@@ -9,6 +9,7 @@ export type PartnerSubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CA
 
 export interface PartnerOrganization {
   id: string;
+  customerNumber: number;
   name: string;
   slug: string;
   createdAt: string;

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Building2, Check, Info, Loader2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatCustomerCode } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   PartnerChangeRequest,
@@ -160,8 +160,8 @@ function SettingsRow({
   label: string;
   value?: string;
   description?: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-4">
@@ -171,13 +171,15 @@ function SettingsRow({
       </div>
       <div className="flex shrink-0 items-center gap-3">
         {value && <span className="text-ink-450 text-[14px]">{value}</span>}
-        <button
-          type="button"
-          onClick={onAction}
-          className="text-foreground hover:text-primary cursor-pointer text-[13px] font-semibold underline underline-offset-2"
-        >
-          {actionLabel}
-        </button>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="text-foreground hover:text-primary cursor-pointer text-[13px] font-semibold underline underline-offset-2"
+          >
+            {actionLabel}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -898,6 +900,11 @@ export function SettingsView() {
               value={organization.name}
               actionLabel="Edit"
               onAction={() => setEditingField("orgName")}
+            />
+            <SettingsRow
+              label="Customer ID"
+              value={formatCustomerCode(organization.customerNumber)}
+              description="Quote this if you contact support."
             />
           </div>
         </SectionCard>

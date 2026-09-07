@@ -17,3 +17,8 @@ export function formatDate(iso: string): string {
     year: "numeric",
   });
 }
+
+/** The short, sequential, human-quotable customer ID — "NXL-000123" — shown to the customer, admin, and partner. Distinct from the org's internal cuid (never shown) and its slug (derived from the workspace name, changes if renamed). */
+export function formatCustomerCode(customerNumber: number): string {
+  return `NXL-${String(customerNumber).padStart(6, "0")}`;
+}

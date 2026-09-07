@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Users, Wallet } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { formatBytes, formatDate } from "@/lib/format";
+import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   PartnerChangeRequestSummary,
@@ -201,7 +201,9 @@ function CustomersTab({
             <tr key={org.id} className="border-border-subtle hover:bg-surface-muted/50 border-b last:border-0">
               <td className="px-4 py-3">
                 <div className="text-foreground font-semibold">{org.name}</div>
-                <div className="text-ink-450 text-[12px]">{org.slug}</div>
+                <div className="text-ink-450 text-[12px]">
+                  {formatCustomerCode(org.customerNumber)} · {org.slug}
+                </div>
               </td>
               <td className="px-4 py-3">
                 {org.subscription ? org.subscription.plan.name : <span className="text-ink-450">—</span>}

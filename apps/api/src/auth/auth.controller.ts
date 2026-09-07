@@ -76,6 +76,7 @@ export class AuthController {
       user: req.user,
       organization: {
         id: membership.organization.id,
+        customerNumber: membership.organization.customerNumber,
         name: membership.organization.name,
         slug: membership.organization.slug,
         role: membership.role,

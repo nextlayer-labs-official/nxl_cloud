@@ -140,8 +140,10 @@ export class BillingService {
       await this.assertStorageFitsPlan(membership.organizationId, existingSubscription!, plan);
     }
 
+    // TRIALING counts as "mid-cycle" too — a downgrade shouldn't cut a trial
+    // short just because no payment has actually been collected yet.
     const hasActivePeriod =
-      existingSubscription?.status === "ACTIVE" &&
+      (existingSubscription?.status === "ACTIVE" || existingSubscription?.status === "TRIALING") &&
       !!existingSubscription.currentPeriodEnd &&
       existingSubscription.currentPeriodEnd > new Date();
 
@@ -364,8 +366,10 @@ export class BillingService {
       }
     }
 
+    // TRIALING counts as "mid-cycle" too — a downgrade shouldn't cut a trial
+    // short just because no payment has actually been collected yet.
     const hasActivePeriod =
-      existingSubscription?.status === "ACTIVE" &&
+      (existingSubscription?.status === "ACTIVE" || existingSubscription?.status === "TRIALING") &&
       !!existingSubscription.currentPeriodEnd &&
       existingSubscription.currentPeriodEnd > new Date();
 

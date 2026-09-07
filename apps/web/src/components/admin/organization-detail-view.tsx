@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Loader2, Mail, UserCheck } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { formatBytes, formatDate } from "@/lib/format";
+import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   AdminAuditLogEntry,
@@ -118,7 +118,9 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">{org.name}</h1>
-          <p className="text-ink-450 text-sm">{org.slug}</p>
+          <p className="text-ink-450 text-sm">
+            {formatCustomerCode(org.customerNumber)} · {org.slug}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {org.partner && (

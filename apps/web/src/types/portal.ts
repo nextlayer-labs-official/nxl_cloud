@@ -17,6 +17,7 @@ export interface PartnerInfo {
 
 export interface PortalOrganization {
   id: string;
+  customerNumber: number;
   name: string;
   slug: string;
   role: MembershipRole;

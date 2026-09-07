@@ -110,20 +110,25 @@ model VerificationToken {
 }
 
 model Organization {
-  id          String    @id @default(cuid())
-  name        String
-  slug        String    @unique
-  region      String?
-  suspendedAt DateTime?
+  id             String    @id @default(cuid())
+  /// Short, sequential, human-quotable identifier — shown to the customer,
+  /// admin, and partner as "NXL-000123" (see lib/format.ts's formatCustomerCode
+  /// on the frontend). Distinct from `id` (an opaque cuid, never shown to
+  /// anyone) and `slug` (derived from the workspace name, changes if renamed).
+  customerNumber Int       @unique @default(autoincrement())
+  name           String
+  slug           String    @unique
+  region         String?
+  suspendedAt    DateTime?
   /// Set once the org owner maps in a partner's code (Settings) — that first
   /// mapping applies immediately since no existing partner relationship is
   /// being disturbed. While set, self-serve billing (BillingService.createOrder)
   /// is locked — only that partner (via the partner portal) or platform admin
   /// can change the plan. Leaving or switching away from an existing mapping is
   /// NOT immediate — see PartnerChangeRequest.
-  partnerId   String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  partnerId      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   memberships          Membership[]
   teams                Team[]

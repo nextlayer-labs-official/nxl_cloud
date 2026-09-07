@@ -1,17 +1,21 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma, type BillingCycle } from "@nextlayer/database";
+import { EmailService } from "../email/email.service";
 import type { UpdatePartnerSubscriptionDto } from "./dto/update-partner-subscription.dto";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PERIOD_MS: Record<BillingCycle, number> = { MONTHLY: 30 * DAY_MS, ANNUAL: 365 * DAY_MS };
 const CYCLE_DAYS: Record<BillingCycle, number> = { MONTHLY: 30, ANNUAL: 365 };
 const BYTES_PER_GB = 1024 * 1024 * 1024;
+const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://localhost:3000";
 
 /** The `tx` param type $transaction's interactive-callback form actually hands back — extracted this way since the generated client doesn't export a plain `Prisma.TransactionClient` name in this version. */
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 @Injectable()
 export class PartnerService {
+  constructor(private readonly email: EmailService) {}
+
   /** null = unlimited. Mirrors OrganizationsService.effectiveLimitBytes — an admin-set `storageLimitGbOverride` wins over the plan's own default. */
   private effectiveLimitBytes(
     subscription: { storageLimitGbOverride: number | null; plan: { storageLimitGb: number | null } } | null,
@@ -37,6 +41,7 @@ export class PartnerService {
 
     return orgs.map((org) => ({
       id: org.id,
+      customerNumber: org.customerNumber,
       name: org.name,
       slug: org.slug,
       createdAt: org.createdAt,
@@ -141,8 +146,10 @@ export class PartnerService {
       include: { plan: true },
     });
     const isPlanChange = !!existingSubscription && existingSubscription.plan.id !== plan.id;
+    // TRIALING counts as "mid-cycle" too — a downgrade shouldn't cut a trial
+    // short just because no payment has actually been collected yet.
     const hasActivePeriod =
-      existingSubscription?.status === "ACTIVE" &&
+      (existingSubscription?.status === "ACTIVE" || existingSubscription?.status === "TRIALING") &&
       !!existingSubscription.currentPeriodEnd &&
       existingSubscription.currentPeriodEnd > new Date();
     // Every org gets the platform's default (free) plan at registration —
@@ -183,7 +190,12 @@ export class PartnerService {
         });
         return tx.subscription.update({
           where: { organizationId },
-          data: { planId: plan.id, billingCycle: cycle, currentPeriodEnd: new Date(Date.now() + PERIOD_MS[cycle]) },
+          data: {
+            planId: plan.id,
+            billingCycle: cycle,
+            status: "ACTIVE",
+            currentPeriodEnd: new Date(Date.now() + PERIOD_MS[cycle]),
+          },
           include: { plan: true },
         });
       });
@@ -211,6 +223,7 @@ export class PartnerService {
         update: {
           planId: plan.id,
           billingCycle: dto.billingCycle,
+          status: "ACTIVE",
           currentPeriodEnd: new Date(Date.now() + PERIOD_MS[dto.billingCycle]),
         },
         include: { plan: true },
@@ -344,7 +357,7 @@ export class PartnerService {
   /** Releases (or hands off) the organization and marks the request resolved — the only way a mapping actually changes once it's no longer a first-time mapping. */
   async approveChangeRequest(partnerId: string, requestId: string) {
     const request = await this.requireOwnChangeRequest(partnerId, requestId);
-    return prisma.$transaction([
+    const [, updatedRequest] = await prisma.$transaction([
       prisma.organization.update({
         where: { id: request.organizationId },
         data: { partnerId: request.newPartnerId },
@@ -353,15 +366,44 @@ export class PartnerService {
         where: { id: request.id },
         data: { status: "APPROVED", resolvedAt: new Date() },
       }),
-    ]).then(([, updatedRequest]) => updatedRequest);
+    ]);
+    await this.notifyCustomerOfChangeRequestResolution(partnerId, request, true);
+    return updatedRequest;
   }
 
   /** Declines the request — the organization stays mapped to this partner. */
   async rejectChangeRequest(partnerId: string, requestId: string) {
     const request = await this.requireOwnChangeRequest(partnerId, requestId);
-    return prisma.partnerChangeRequest.update({
+    const updated = await prisma.partnerChangeRequest.update({
       where: { id: request.id },
       data: { status: "REJECTED", resolvedAt: new Date() },
     });
+    await this.notifyCustomerOfChangeRequestResolution(partnerId, request, false);
+    return updated;
+  }
+
+  /** Tells the org's owner whether their leave/switch request was approved or declined — the mapping only ever actually changes on approval. */
+  private async notifyCustomerOfChangeRequestResolution(
+    partnerId: string,
+    request: { organizationId: string; newPartnerId: string | null },
+    approved: boolean,
+  ) {
+    const [partner, ownerMembership, newPartner] = await Promise.all([
+      prisma.partner.findUniqueOrThrow({ where: { id: partnerId } }),
+      prisma.membership.findFirst({
+        where: { organizationId: request.organizationId, role: "OWNER" },
+        include: { user: true },
+      }),
+      request.newPartnerId ? prisma.partner.findUnique({ where: { id: request.newPartnerId } }) : null,
+    ]);
+    if (!ownerMembership) return;
+
+    const actionDescription = newPartner ? `switch to ${newPartner.name}` : "leave this partner mapping";
+    const link = `${WEB_ORIGIN}/portal/settings?tab=billing`;
+    if (approved) {
+      await this.email.sendPartnerChangeApprovedEmail(ownerMembership.user.email, partner.name, actionDescription, link);
+    } else {
+      await this.email.sendPartnerChangeRejectedEmail(ownerMembership.user.email, partner.name, actionDescription, link);
+    }
   }
 }

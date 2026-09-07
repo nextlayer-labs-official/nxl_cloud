@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
+import { EmailService } from "../email/email.service";
 import type { UpdateOrganizationDto } from "./dto/update-organization.dto";
+
+const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://localhost:3000";
 
 function toSafePartner(partner: { id: string; name: string; code: string; email: string }) {
   return { id: partner.id, name: partner.name, code: partner.code, email: partner.email };
@@ -23,6 +26,8 @@ const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 @Injectable()
 export class OrganizationsService {
+  constructor(private readonly email: EmailService) {}
+
   /**
    * MVP simplification: a user may belong to multiple orgs (schema supports
    * it), but the portal doesn't have an org-switcher yet, so every
@@ -117,6 +122,17 @@ export class OrganizationsService {
       create: { organizationId: membership.organizationId, currentPartnerId, newPartnerId: partner.id },
       update: { currentPartnerId, newPartnerId: partner.id, status: "PENDING", resolvedAt: null },
     });
+
+    const currentPartner = await prisma.partner.findUnique({ where: { id: currentPartnerId } });
+    if (currentPartner) {
+      await this.email.sendPartnerChangeRequestEmail(
+        currentPartner.email,
+        membership.organization.name,
+        `switch to ${partner.name}`,
+        `${WEB_ORIGIN}/partner`,
+      );
+    }
+
     return { status: "pending" as const, request: toSafeChangeRequest(request, partner) };
   }
 
@@ -133,6 +149,17 @@ export class OrganizationsService {
       create: { organizationId: membership.organizationId, currentPartnerId, newPartnerId: null },
       update: { currentPartnerId, newPartnerId: null, status: "PENDING", resolvedAt: null },
     });
+
+    const currentPartner = await prisma.partner.findUnique({ where: { id: currentPartnerId } });
+    if (currentPartner) {
+      await this.email.sendPartnerChangeRequestEmail(
+        currentPartner.email,
+        membership.organization.name,
+        "leave your partner mapping",
+        `${WEB_ORIGIN}/partner`,
+      );
+    }
+
     return { status: "pending" as const, request: toSafeChangeRequest(request, null) };
   }
 
