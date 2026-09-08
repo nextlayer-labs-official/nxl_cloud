@@ -1,6 +1,6 @@
-# Nextlayer Cloud
+# Skylyer
 
-Monorepo for the Nextlayer Cloud platform.
+Monorepo for the Skylyer platform (built by Nextlayer Labs).
 
 ## Structure
 

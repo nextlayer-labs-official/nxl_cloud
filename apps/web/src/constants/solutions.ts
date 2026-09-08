@@ -9,7 +9,7 @@ export const SEGMENTS: Record<string, SolutionsSegment> = {
     id: "it",
     label: "IT",
     headline: "Give IT the control it needs",
-    body: "Centralized admin controls and a full audit trail mean IT can approve Nextlayer Cloud with confidence.",
+    body: "Centralized admin controls and a full audit trail mean IT can approve Skylyer with confidence.",
     benefits: [
       { title: "Admin console", body: "Manage members, plans, and storage from one place." },
       { title: "Audit trail", body: "A complete record of every access and permission change." },

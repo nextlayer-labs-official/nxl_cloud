@@ -55,7 +55,7 @@ export function PortalTopBar() {
         href="/portal"
         className="text-foreground shrink-0 text-[18px] font-bold tracking-[-0.02em]"
       >
-        Nextlayer Cloud
+        Skylyer
       </Link>
 
       <form onSubmit={handleSubmit} className="mx-auto w-full max-w-xl">
@@ -64,7 +64,7 @@ export function PortalTopBar() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search in Nextlayer Cloud"
+            placeholder="Search in Skylyer"
             className="bg-surface-muted focus:bg-background focus:border-input w-full rounded-full border border-transparent py-2.5 pr-4 pl-11 text-sm outline-none transition-colors"
           />
         </div>

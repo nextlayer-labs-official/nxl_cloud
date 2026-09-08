@@ -17,6 +17,7 @@ const NAV_LINKS = [
   { href: "/admin/partners", label: "Partners" },
   { href: "/admin/plans", label: "Plans" },
   { href: "/admin/audit-log", label: "Audit Log" },
+  { href: "/admin/settings", label: "Settings" },
 ];
 
 /** "/admin" is a prefix of every other admin path, so it needs an exact match; every other link should stay highlighted on its own nested/detail routes (e.g. /admin/organizations/:id). */
@@ -58,7 +59,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <div className="bg-background text-foreground min-h-screen w-full">
         <header className="border-border-subtle bg-background flex h-16 shrink-0 items-center gap-6 border-b px-6">
           <Link href="/admin" className="text-foreground shrink-0 text-[17px] font-bold tracking-[-0.02em]">
-            Nextlayer Cloud <span className="text-ink-450 font-medium">Admin</span>
+            Skylyer <span className="text-ink-450 font-medium">Admin</span>
           </Link>
           <nav className="flex items-center gap-1">
             {NAV_LINKS.map((link) => (

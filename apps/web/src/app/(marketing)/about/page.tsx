@@ -27,7 +27,7 @@ export default function AboutPage() {
           <PlaceholderVisual label="product visual placeholder" className="h-[280px] rounded-2xl" />
           <div>
             <p className="text-ink-600 mb-4 text-base leading-[1.7]">
-              Nextlayer Cloud was built for teams that outgrow consumer-grade cloud storage —
+              Skylyer was built for teams that outgrow consumer-grade cloud storage —
               organizations that need real access control, a full audit trail, and billing that
               actually fits how they buy software, not just a bigger storage quota.
             </p>

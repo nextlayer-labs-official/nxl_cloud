@@ -23,7 +23,7 @@ export const FAQ_GROUPS: { title: string; items: FaqEntry[] }[] = [
     items: [
       {
         q: "Is my data encrypted in transit?",
-        a: "Yes — all traffic to and from Nextlayer Cloud runs over HTTPS/TLS.",
+        a: "Yes — all traffic to and from Skylyer runs over HTTPS/TLS.",
       },
       {
         q: "How are passwords stored?",

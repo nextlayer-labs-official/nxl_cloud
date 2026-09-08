@@ -204,3 +204,10 @@ export interface AdminAuditLogEntry {
   organization: { name: string; slug: string };
   actor: { name: string; email: string } | null;
 }
+
+/** Platform-wide toggles — today just the Razorpay kill-switch (see /admin/settings). */
+export interface AdminPlatformSettings {
+  paymentsEnabled: boolean;
+  updatedAt: string | null;
+  updatedByName: string | null;
+}

@@ -11,6 +11,7 @@ import { prisma, type BillingCycle, type Plan, type Subscription } from "@nextla
 import Razorpay from "razorpay";
 import { validatePaymentVerification, validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils";
 import { OrganizationsService } from "../organizations/organizations.service";
+import { getPlatformSettings } from "../platform-settings/platform-settings.util";
 import type { CreateOrderDto } from "./dto/create-order.dto";
 import type { VerifyPaymentDto } from "./dto/verify-payment.dto";
 
@@ -22,6 +23,9 @@ const PERIOD_MS: Record<BillingCycle, number> = {
 const CYCLE_DAYS: Record<BillingCycle, number> = { MONTHLY: 30, ANNUAL: 365 };
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+/** Shown by both createOrder (thrown) and getOrderPreview (as blockedReason) — admin's Payments toggle, see platform-settings.util.ts. */
+const PAYMENTS_DISABLED_MESSAGE = "Payments aren't available yet — check back soon or contact support.";
 
 interface OrderNotes {
   organizationId?: string;
@@ -129,6 +133,16 @@ export class BillingService {
 
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
+
+    // Customer self-serve checkout only — partner wallet-debit and admin
+    // manual overrides never reach this method, so this toggle doesn't
+    // touch them (see platform-settings.util.ts).
+    if (!plan.isDefault) {
+      const settings = await getPlatformSettings();
+      if (!settings.paymentsEnabled) {
+        throw new BadRequestException(PAYMENTS_DISABLED_MESSAGE);
+      }
+    }
 
     const existingSubscription = await prisma.subscription.findUnique({
       where: { organizationId: membership.organizationId },
@@ -340,6 +354,27 @@ export class BillingService {
       currentPlanName: existingSubscription?.plan.name ?? null,
       currentPeriodEnd: existingSubscription?.currentPeriodEnd?.toISOString() ?? null,
     };
+
+    if (!plan.isDefault) {
+      const settings = await getPlatformSettings();
+      if (!settings.paymentsEnabled) {
+        return {
+          ...base,
+          kind: "purchase" as const,
+          blocked: true,
+          blockedReason: PAYMENTS_DISABLED_MESSAGE,
+          listPriceCents: null,
+          discountPercent: null,
+          unusedOldValueCents: null,
+          proratedNewCostCents: null,
+          amountPayableCents: 0,
+          creditAppliedCents: 0,
+          daysRemaining: null,
+          newPeriodEndPreview: null,
+          availableOn: null,
+        };
+      }
+    }
 
     if (isPlanChange) {
       const storageReason = await this.checkStorageFit(

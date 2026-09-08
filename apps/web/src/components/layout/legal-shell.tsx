@@ -15,7 +15,7 @@ export function LegalShell({ title, lastUpdated, sections, contactPrompt }: Lega
       <header className="border-border-subtle bg-background sticky top-0 z-50 border-b">
         <div className="mx-auto flex h-[72px] max-w-[1280px] items-center justify-between px-6">
           <Link href="/" className="text-foreground text-[19px] font-bold tracking-[-0.02em]">
-            Nextlayer Cloud
+            Skylyer
           </Link>
           <Link href="/" className="text-ink-550 text-sm">
             Back to home
@@ -48,6 +48,18 @@ export function LegalShell({ title, lastUpdated, sections, contactPrompt }: Lega
             <div key={section.id} id={section.id} className="mb-9">
               <h2 className="mb-3 text-[19px] font-bold">{section.title}</h2>
               <p className="text-[15px] leading-[1.7] text-[oklch(0.3_0.02_260)]">{section.body}</p>
+              {section.items && (
+                <ul className="mt-3 flex flex-col gap-1.5">
+                  {section.items.map((item, i) => (
+                    <li
+                      key={i}
+                      className="text-[15px] leading-[1.7] text-[oklch(0.3_0.02_260)] before:content-['—_'] before:text-ink-450"
+                    >
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ))}
           <p className="text-ink-550 mt-12 text-sm">

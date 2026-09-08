@@ -161,7 +161,7 @@ export default function HomePage() {
       <section className="px-10 py-[140px] text-center">
         <div className="mx-auto max-w-[1080px]">
           <h2 className="mb-16 text-[32px] font-bold tracking-[-0.02em]">
-            Why teams choose Nextlayer Cloud
+            Why teams choose Skylyer
           </h2>
           <div className="border-border grid grid-cols-2 overflow-hidden rounded-2xl border">
             <div className="bg-surface-muted-2 p-10 text-left">

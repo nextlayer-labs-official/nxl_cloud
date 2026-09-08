@@ -1,4 +1,4 @@
-# Deploying Nextlayer Cloud (staging/VPS)
+# Deploying Skylyer (staging/VPS)
 
 This covers getting the app running on a fresh Ubuntu VPS with MySQL and pm2
 already installed. It's written from an actual deployment run, including the
@@ -117,7 +117,7 @@ or errors, re-run it before continuing.
 This creates 3 billing plans, a demo org ("Acme Labs"), and **one login you
 can actually use**:
 
-- **Admin panel** (`/admin/login`): `admin@nextlayer.cloud` / `Admin12345`
+- **Admin panel** (`/admin/login`): `admin@skylyer.cloud` / `Admin12345`
   (or whatever `ADMIN_SEED_PASSWORD` was set to in `.env` before seeding).
 
 The 3 demo *customer* users (Alex Chen, Jordan Lee, Sam Rivera) are seeded

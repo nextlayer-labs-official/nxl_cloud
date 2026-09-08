@@ -6,7 +6,7 @@ import { PARTNER_BENEFITS } from "@/constants/partners";
 
 export const metadata: Metadata = {
   title: "Partners",
-  description: "Resell Nextlayer Cloud to your own customers, with your own portal and pricing.",
+  description: "Resell Skylyer to your own customers, with your own portal and pricing.",
 };
 
 export default function PartnersPage() {
@@ -17,7 +17,7 @@ export default function PartnersPage() {
       {/* Hero */}
       <section className="px-10 pt-[100px] pb-16 text-center">
         <h1 className="mb-4 text-[42px] font-bold tracking-[-0.02em]">
-          Resell Nextlayer Cloud to your own customers
+          Resell Skylyer to your own customers
         </h1>
         <p className="text-muted-foreground mx-auto max-w-[560px] text-[17px]">
           Onboarded partners get a dedicated portal to manage every customer mapped to their code —

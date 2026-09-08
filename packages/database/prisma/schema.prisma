@@ -1,4 +1,4 @@
-// Nextlayer Cloud — core data model.
+// Skylyer — core data model.
 // Entities trace directly to what the marketing site promises: multi-tenant orgs,
 // team spaces, granular folder/file permissions, unlimited version history,
 // expiring share links, audit/activity logging, SSO/SCIM, and plan-based billing.
@@ -249,7 +249,7 @@ model FileVersion {
 
 /// Granular, resource-level access control ("down to the folder"). A null
 /// granteeId with granteeType ORGANIZATION means an org-wide default grant.
-/// A row can also be "pending" — shared to an email with no Nextlayer Cloud
+/// A row can also be "pending" — shared to an email with no Skylyer
 /// account yet (granteeId null, pendingEmail set). It grants nothing until
 /// claimed: registering with a matching email adopts every pending row as
 /// that user's real grant (see claimPendingGrants in permission.util.ts),
@@ -394,8 +394,9 @@ model AdminUser {
   passwordHash String
   createdAt    DateTime @default(now())
 
-  sessions             AdminSession[]
-  partnerWalletCredits PartnerWalletTransaction[]
+  sessions              AdminSession[]
+  partnerWalletCredits  PartnerWalletTransaction[]
+  platformSettingsEdits PlatformSettings[]
 }
 
 model AdminSession {
@@ -633,4 +634,19 @@ model SsoConnection {
   updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Singleton row (fixed id "singleton") for platform-wide toggles set from
+/// the admin panel — starts with just the Razorpay kill-switch: while
+/// `paymentsEnabled` is false, customer self-serve checkout is blocked
+/// before it ever reaches Razorpay. Partner wallet-debit and admin manual
+/// plan assignment don't touch Razorpay at all, so they're unaffected by
+/// this on purpose — see BillingService.
+model PlatformSettings {
+  id              String   @id @default("singleton")
+  paymentsEnabled Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+  updatedById     String?
+
+  updatedBy AdminUser? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
 }

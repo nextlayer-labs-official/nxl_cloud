@@ -27,6 +27,12 @@ export function Footer({ variant, copyright = DEFAULT_COPYRIGHT }: FooterProps) 
             <Link href="/terms" className="text-ink-450">
               Terms
             </Link>
+            <Link href="/acceptable-use" className="text-ink-450">
+              Acceptable Use
+            </Link>
+            <Link href="/refund-cancellation" className="text-ink-450">
+              Refunds
+            </Link>
             <Link href="/" className="text-ink-450">
               Home
             </Link>
@@ -41,7 +47,7 @@ export function Footer({ variant, copyright = DEFAULT_COPYRIGHT }: FooterProps) 
       <div className="mx-auto max-w-[1280px]">
         <div className="mb-14 grid grid-cols-[1.4fr_repeat(3,1fr)] gap-10">
           <div>
-            <div className="mb-3 text-lg font-bold">Nextlayer Cloud</div>
+            <div className="mb-3 text-lg font-bold">Skylyer</div>
             <p className="text-muted-foreground mb-5 max-w-[220px] text-sm">
               Secure cloud storage for modern businesses.
             </p>
@@ -81,6 +87,12 @@ export function Footer({ variant, copyright = DEFAULT_COPYRIGHT }: FooterProps) 
             </Link>
             <Link href="/terms" className="text-ink-450">
               Terms
+            </Link>
+            <Link href="/acceptable-use" className="text-ink-450">
+              Acceptable Use
+            </Link>
+            <Link href="/refund-cancellation" className="text-ink-450">
+              Refunds
             </Link>
           </div>
         </div>

@@ -8,7 +8,7 @@ import { FEATURE_SECTIONS } from "@/constants/features";
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "From storage to audit trails — a closer look at how Nextlayer Cloud handles the details.",
+    "From storage to audit trails — a closer look at how Skylyer handles the details.",
 };
 
 export default function FeaturesPage() {
@@ -25,7 +25,7 @@ export default function FeaturesPage() {
           Everything your team needs to manage files, securely
         </h1>
         <p className="text-muted-foreground mx-auto max-w-[600px] text-lg">
-          From storage to audit trails — a closer look at how Nextlayer Cloud handles the details.
+          From storage to audit trails — a closer look at how Skylyer handles the details.
         </p>
       </section>
 

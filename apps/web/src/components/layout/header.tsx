@@ -17,7 +17,7 @@ export function Header() {
           href="/"
           className="text-foreground text-[19px] font-bold tracking-[-0.02em] whitespace-nowrap"
         >
-          Nextlayer Cloud
+          Skylyer
         </Link>
 
         <button

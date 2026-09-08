@@ -12,7 +12,7 @@ export function AuthShell({
     <div className="text-foreground flex min-h-screen w-full flex-col bg-[radial-gradient(ellipse_900px_600px_at_50%_0%,oklch(0.95_0.03_255)_0%,oklch(1_0_0)_65%)]">
       <header className="px-10 py-6">
         <Link href="/" className="text-foreground text-[19px] font-bold tracking-[-0.02em]">
-          Nextlayer Cloud
+          Skylyer
         </Link>
       </header>
       <div className="flex flex-1 items-center justify-center p-10">

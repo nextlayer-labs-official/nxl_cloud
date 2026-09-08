@@ -44,7 +44,7 @@ export function LoginForm() {
   return (
     <>
       <h1 className="mb-6 text-center text-2xl font-bold tracking-[-0.02em]">
-        Log in to Nextlayer Cloud
+        Log in to Skylyer
       </h1>
 
       {error && (

@@ -6,7 +6,7 @@ import { SolutionsSegments } from "@/components/marketing/solutions-segments";
 
 export const metadata: Metadata = {
   title: "Solutions",
-  description: "See how Nextlayer Cloud fits your team's function or your company's stage.",
+  description: "See how Skylyer fits your team's function or your company's stage.",
 };
 
 export default function SolutionsPage() {
@@ -23,7 +23,7 @@ export default function SolutionsPage() {
           Built for how your organization works
         </h1>
         <p className="text-muted-foreground mx-auto max-w-[600px] text-lg">
-          See how Nextlayer Cloud fits your team&apos;s function or your company&apos;s stage.
+          See how Skylyer fits your team&apos;s function or your company&apos;s stage.
         </p>
       </section>
 

@@ -4,6 +4,7 @@ import { hashPassword } from "../auth/password.util";
 import { sendVerificationEmailFor } from "../auth/verification-token.util";
 import { EmailService } from "../email/email.service";
 import { uniqueOrgSlug } from "../organizations/slug.util";
+import { getPlatformSettings, setPaymentsEnabled } from "../platform-settings/platform-settings.util";
 import type { ChangePlanDto } from "./dto/change-plan.dto";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import type { CreatePartnerDto } from "./dto/create-partner.dto";
@@ -11,6 +12,7 @@ import type { CreatePlanDto } from "./dto/create-plan.dto";
 import type { CreditPartnerWalletDto } from "./dto/credit-partner-wallet.dto";
 import type { SetPartnerPlanPriceDto } from "./dto/set-partner-plan-price.dto";
 import type { UpdatePlanDto } from "./dto/update-plan.dto";
+import type { UpdatePlatformSettingsDto } from "./dto/update-platform-settings.dto";
 import type { UpdateSubscriptionDto } from "./dto/update-subscription.dto";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -826,4 +828,14 @@ export class AdminService {
     };
   }
 
+  /** Platform-wide toggles — today just the Razorpay kill-switch (see BillingService). */
+  async getSettings() {
+    const settings = await getPlatformSettings();
+    return { paymentsEnabled: settings.paymentsEnabled, updatedAt: settings.updatedAt, updatedByName: settings.updatedBy?.name ?? null };
+  }
+
+  async updateSettings(adminId: string, dto: UpdatePlatformSettingsDto) {
+    const settings = await setPaymentsEnabled(dto.paymentsEnabled, adminId);
+    return { paymentsEnabled: settings.paymentsEnabled, updatedAt: settings.updatedAt, updatedByName: settings.updatedBy?.name ?? null };
+  }
 }

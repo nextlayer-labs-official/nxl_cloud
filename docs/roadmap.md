@@ -1,4 +1,4 @@
-# Nextlayer Cloud — Full Roadmap
+# Skylyer — Full Roadmap
 
 Status snapshot and remaining phases from marketing site to complete SaaS platform.
 
@@ -20,7 +20,7 @@ design export, plus 5 stub pages for nav/footer links that had no source design.
 - ⏳ Automated test coverage — not done, deliberately deferred
 
 Note: `constants/site.ts` has `SITE_URL` set to a placeholder domain
-(`https://nextlayer.cloud`) — override via `NEXT_PUBLIC_SITE_URL` once a real production
+(`https://skylyer.cloud`) — override via `NEXT_PUBLIC_SITE_URL` once a real production
 domain is assigned, since it feeds the sitemap, robots.txt, and OG image URLs.
 
 ## Phase 2 — Database & ORM Foundation ✅ Done
@@ -427,7 +427,7 @@ a data-model migration.
 - ✅ `AdminUser`/`AdminSession` Prisma models — own table, own session cookie
   (`admin_session_token`, distinct from the customer `session_token`), own login
   form. No boolean flag anywhere on `User`. Seeded via `prisma/seed.ts`
-  (`admin@nextlayer.cloud`, password from `ADMIN_SEED_PASSWORD` env or a dev
+  (`admin@skylyer.cloud`, password from `ADMIN_SEED_PASSWORD` env or a dev
   default) since there's no signup flow for admins.
 - ✅ Backend: `apps/api/src/admin/` — self-contained module (`AdminAuthController`/
   `AdminAuthService`/`AdminSessionGuard` for auth, `AdminController`/`AdminService`

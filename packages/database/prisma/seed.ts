@@ -160,10 +160,10 @@ async function main() {
 
   const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? "Admin12345";
   const adminUser = await prisma.adminUser.upsert({
-    where: { email: "admin@nextlayer.cloud" },
+    where: { email: "admin@skylyer.cloud" },
     update: {},
     create: {
-      email: "admin@nextlayer.cloud",
+      email: "admin@skylyer.cloud",
       name: "Platform Admin",
       passwordHash: await hashPassword(adminPassword),
     },

@@ -20,7 +20,7 @@ export class EmailService {
     const port = process.env.SMTP_PORT;
     const user = process.env.SMTP_USER;
     const password = process.env.SMTP_PASSWORD;
-    this.from = process.env.SMTP_FROM || "Nextlayer Cloud <no-reply@nextlayer.cloud>";
+    this.from = process.env.SMTP_FROM || "Skylyer <no-reply@skylyer.cloud>";
 
     this.transporter =
       host && port && user && password
@@ -48,18 +48,18 @@ export class EmailService {
   async sendVerificationEmail(to: string, name: string, link: string) {
     await this.send(
       to,
-      "Verify your email — Nextlayer Cloud",
-      `Hi ${name},\n\nVerify your email address to finish setting up your Nextlayer Cloud account:\n${link}\n\nThis link expires in 24 hours.`,
-      `<p>Hi ${name},</p><p>Verify your email address to finish setting up your Nextlayer Cloud account:</p><p><a href="${link}">${link}</a></p><p>This link expires in 24 hours.</p>`,
+      "Verify your email — Skylyer",
+      `Hi ${name},\n\nVerify your email address to finish setting up your Skylyer account:\n${link}\n\nThis link expires in 24 hours.`,
+      `<p>Hi ${name},</p><p>Verify your email address to finish setting up your Skylyer account:</p><p><a href="${link}">${link}</a></p><p>This link expires in 24 hours.</p>`,
     );
   }
 
   async sendPasswordResetEmail(to: string, name: string, link: string) {
     await this.send(
       to,
-      "Reset your password — Nextlayer Cloud",
-      `Hi ${name},\n\nReset your Nextlayer Cloud password:\n${link}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email.`,
-      `<p>Hi ${name},</p><p>Reset your Nextlayer Cloud password:</p><p><a href="${link}">${link}</a></p><p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>`,
+      "Reset your password — Skylyer",
+      `Hi ${name},\n\nReset your Skylyer password:\n${link}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email.`,
+      `<p>Hi ${name},</p><p>Reset your Skylyer password:</p><p><a href="${link}">${link}</a></p><p>This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>`,
     );
   }
 
@@ -74,9 +74,9 @@ export class EmailService {
     const levelText = accessLevel === "EDITOR" ? "edit" : "view";
     await this.send(
       to,
-      `${sharerName} shared "${resourceName}" with you — Nextlayer Cloud`,
-      `Hi,\n\n${sharerName} gave you access to ${levelText} the ${resourceType} "${resourceName}" on Nextlayer Cloud.\n\nOpen it here:\n${link}`,
-      `<p>Hi,</p><p>${sharerName} gave you access to ${levelText} the ${resourceType} "${resourceName}" on Nextlayer Cloud.</p><p><a href="${link}">${link}</a></p>`,
+      `${sharerName} shared "${resourceName}" with you — Skylyer`,
+      `Hi,\n\n${sharerName} gave you access to ${levelText} the ${resourceType} "${resourceName}" on Skylyer.\n\nOpen it here:\n${link}`,
+      `<p>Hi,</p><p>${sharerName} gave you access to ${levelText} the ${resourceType} "${resourceName}" on Skylyer.</p><p><a href="${link}">${link}</a></p>`,
     );
   }
 
@@ -91,9 +91,9 @@ export class EmailService {
     const levelText = accessLevel === "EDITOR" ? "edit" : "view";
     await this.send(
       to,
-      `${sharerName} invited you to Nextlayer Cloud — Nextlayer Cloud`,
-      `Hi,\n\n${sharerName} wants to give you access to ${levelText} the ${resourceType} "${resourceName}" on Nextlayer Cloud. Create a free account to open it:\n${registerLink}`,
-      `<p>Hi,</p><p>${sharerName} wants to give you access to ${levelText} the ${resourceType} "${resourceName}" on Nextlayer Cloud. Create a free account to open it:</p><p><a href="${registerLink}">${registerLink}</a></p>`,
+      `${sharerName} invited you to Skylyer`,
+      `Hi,\n\n${sharerName} wants to give you access to ${levelText} the ${resourceType} "${resourceName}" on Skylyer. Create a free account to open it:\n${registerLink}`,
+      `<p>Hi,</p><p>${sharerName} wants to give you access to ${levelText} the ${resourceType} "${resourceName}" on Skylyer. Create a free account to open it:</p><p><a href="${registerLink}">${registerLink}</a></p>`,
     );
   }
 
@@ -109,16 +109,16 @@ export class EmailService {
     const messageHtml = message ? `<p>Their message: "${message}"</p>` : "";
     await this.send(
       to,
-      `${requesterName} requested access to "${resourceName}" — Nextlayer Cloud`,
-      `Hi,\n\n${requesterName} asked for access to the ${resourceType} "${resourceName}" on Nextlayer Cloud.${messageLine}\n\nReview the request here:\n${reviewLink}`,
-      `<p>Hi,</p><p>${requesterName} asked for access to the ${resourceType} "${resourceName}" on Nextlayer Cloud.</p>${messageHtml}<p><a href="${reviewLink}">${reviewLink}</a></p>`,
+      `${requesterName} requested access to "${resourceName}" — Skylyer`,
+      `Hi,\n\n${requesterName} asked for access to the ${resourceType} "${resourceName}" on Skylyer.${messageLine}\n\nReview the request here:\n${reviewLink}`,
+      `<p>Hi,</p><p>${requesterName} asked for access to the ${resourceType} "${resourceName}" on Skylyer.</p>${messageHtml}<p><a href="${reviewLink}">${reviewLink}</a></p>`,
     );
   }
 
   async sendAccessDeniedEmail(to: string, resourceName: string, resourceType: "file" | "folder") {
     await this.send(
       to,
-      `Your access request was declined — Nextlayer Cloud`,
+      `Your access request was declined — Skylyer`,
       `Hi,\n\nYour request for access to the ${resourceType} "${resourceName}" was declined.`,
       `<p>Hi,</p><p>Your request for access to the ${resourceType} "${resourceName}" was declined.</p>`,
     );
@@ -128,7 +128,7 @@ export class EmailService {
   async sendPartnerChangeRequestEmail(to: string, organizationName: string, actionDescription: string, link: string) {
     await this.send(
       to,
-      `${organizationName} wants to ${actionDescription} — Nextlayer Cloud`,
+      `${organizationName} wants to ${actionDescription} — Skylyer`,
       `Hi,\n\n${organizationName} has asked to ${actionDescription}. Review it in your partner portal:\n${link}`,
       `<p>Hi,</p><p>${organizationName} has asked to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
     );
@@ -138,7 +138,7 @@ export class EmailService {
   async sendPartnerChangeApprovedEmail(to: string, partnerName: string, actionDescription: string, link: string) {
     await this.send(
       to,
-      `Your request was approved — Nextlayer Cloud`,
+      `Your request was approved — Skylyer`,
       `Hi,\n\n${partnerName} approved your request to ${actionDescription}.\n\n${link}`,
       `<p>Hi,</p><p>${partnerName} approved your request to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
     );
@@ -148,7 +148,7 @@ export class EmailService {
   async sendPartnerChangeRejectedEmail(to: string, partnerName: string, actionDescription: string, link: string) {
     await this.send(
       to,
-      `Your request was declined — Nextlayer Cloud`,
+      `Your request was declined — Skylyer`,
       `Hi,\n\n${partnerName} declined your request to ${actionDescription}.\n\n${link}`,
       `<p>Hi,</p><p>${partnerName} declined your request to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
     );

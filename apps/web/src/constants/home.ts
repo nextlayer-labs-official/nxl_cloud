@@ -34,7 +34,7 @@ export const FEATURE_ROWS: FeatureRowData[] = [
 export const SECURITY_COLUMNS: SecurityColumn[] = [
   {
     title: "Encryption",
-    body: "Every connection to Nextlayer Cloud runs over HTTPS/TLS.",
+    body: "Every connection to Skylyer runs over HTTPS/TLS.",
     spec: "TLS in transit",
   },
   {
@@ -52,7 +52,7 @@ export const SECURITY_COLUMNS: SecurityColumn[] = [
 export const HOME_FAQS: FaqEntry[] = [
   {
     q: "Is my data encrypted in transit?",
-    a: "Yes — all traffic to and from Nextlayer Cloud runs over HTTPS/TLS.",
+    a: "Yes — all traffic to and from Skylyer runs over HTTPS/TLS.",
   },
   {
     q: "Can I control who accesses specific folders?",

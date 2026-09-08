@@ -301,7 +301,7 @@ export function ShareModal({ resourceName, resourceType, resourceId, onClose }: 
             </button>
           </div>
           <p className="text-ink-450 mt-2 text-[12px]">
-            If they don&apos;t have a Nextlayer Cloud account yet, we&apos;ll invite them by email.
+            If they don&apos;t have a Skylyer account yet, we&apos;ll invite them by email.
           </p>
           {peopleError && <p className="text-error-text mt-2 text-[13px]">{peopleError}</p>}
         </form>

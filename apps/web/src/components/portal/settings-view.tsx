@@ -726,7 +726,7 @@ export function SettingsView() {
         key: order.keyId,
         amount: order.amount,
         currency: order.currency,
-        name: "Nextlayer Cloud",
+        name: "Skylyer",
         order_id: order.orderId,
         prefill: { name: user.name, email: user.email },
         theme: { color: "#2563eb" },

@@ -43,7 +43,7 @@ export function PartnerShell({ children }: { children: React.ReactNode }) {
       <div className="bg-background text-foreground min-h-screen w-full">
         <header className="border-border-subtle bg-background flex h-16 shrink-0 items-center gap-6 border-b px-6">
           <Link href="/partner" className="text-foreground shrink-0 text-[17px] font-bold tracking-[-0.02em]">
-            Nextlayer Cloud <span className="text-ink-450 font-medium">Partner</span>
+            Skylyer <span className="text-ink-450 font-medium">Partner</span>
           </Link>
           <div className="ml-auto flex items-center gap-4">
             <div className="text-ink-450 text-[13px]">

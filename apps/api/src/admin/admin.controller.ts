@@ -21,6 +21,7 @@ import { CreatePlanDto } from "./dto/create-plan.dto";
 import { CreditPartnerWalletDto } from "./dto/credit-partner-wallet.dto";
 import { SetPartnerPlanPriceDto } from "./dto/set-partner-plan-price.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
+import { UpdatePlatformSettingsDto } from "./dto/update-platform-settings.dto";
 import { UpdateSubscriptionDto } from "./dto/update-subscription.dto";
 import { AdminSessionGuard } from "./guards/admin-session.guard";
 
@@ -172,5 +173,15 @@ export class AdminController {
   @Get("partners/:id/usage-summary")
   getPartnerUsageSummary(@Param("id") id: string) {
     return this.adminService.getPartnerUsageSummary(id);
+  }
+
+  @Get("settings")
+  getSettings() {
+    return this.adminService.getSettings();
+  }
+
+  @Patch("settings")
+  updateSettings(@Req() req: Request, @Body() dto: UpdatePlatformSettingsDto) {
+    return this.adminService.updateSettings(req.adminUser!.id, dto);
   }
 }
