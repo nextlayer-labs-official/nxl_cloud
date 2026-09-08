@@ -9,6 +9,16 @@ import nodemailer, { type Transporter } from "nodemailer";
  * must never behave differently based on configuration state (that would leak
  * whether an email exists).
  */
+/** Escapes text interpolated into an HTML email body — the values below can carry user-chosen text (e.g. an org name), and a raw insert would let it render as markup in the recipient's mail client. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -124,13 +134,19 @@ export class EmailService {
     );
   }
 
-  /** Sent to the CURRENT partner when a mapped customer files a request to leave or switch away — needs their approve/reject in the partner portal. */
+  /**
+   * Sent to the CURRENT partner when a mapped customer files a request to
+   * leave or switch away — needs their approve/reject in the partner
+   * portal. `organizationName` is customer-chosen (org rename has no
+   * character restriction), so the HTML body escapes it — the plain-text
+   * body doesn't need it, since there's no markup sink to inject into there.
+   */
   async sendPartnerChangeRequestEmail(to: string, organizationName: string, actionDescription: string, link: string) {
     await this.send(
       to,
       `${organizationName} wants to ${actionDescription} — Skylyer`,
       `Hi,\n\n${organizationName} has asked to ${actionDescription}. Review it in your partner portal:\n${link}`,
-      `<p>Hi,</p><p>${organizationName} has asked to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
+      `<p>Hi,</p><p>${escapeHtml(organizationName)} has asked to ${escapeHtml(actionDescription)}.</p><p><a href="${link}">${link}</a></p>`,
     );
   }
 
@@ -140,7 +156,7 @@ export class EmailService {
       to,
       `Your request was approved — Skylyer`,
       `Hi,\n\n${partnerName} approved your request to ${actionDescription}.\n\n${link}`,
-      `<p>Hi,</p><p>${partnerName} approved your request to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
+      `<p>Hi,</p><p>${escapeHtml(partnerName)} approved your request to ${escapeHtml(actionDescription)}.</p><p><a href="${link}">${link}</a></p>`,
     );
   }
 
@@ -150,7 +166,7 @@ export class EmailService {
       to,
       `Your request was declined — Skylyer`,
       `Hi,\n\n${partnerName} declined your request to ${actionDescription}.\n\n${link}`,
-      `<p>Hi,</p><p>${partnerName} declined your request to ${actionDescription}.</p><p><a href="${link}">${link}</a></p>`,
+      `<p>Hi,</p><p>${escapeHtml(partnerName)} declined your request to ${escapeHtml(actionDescription)}.</p><p><a href="${link}">${link}</a></p>`,
     );
   }
 }
