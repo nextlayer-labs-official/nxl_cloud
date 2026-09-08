@@ -62,7 +62,7 @@ export interface PartnerWalletTransaction {
   note: string | null;
   createdAt: string;
   createdBy: { name: string } | null;
-  organization: { name: string } | null;
+  organization: { name: string; customerNumber: number } | null;
   plan: { name: string } | null;
 }
 

@@ -373,6 +373,7 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
                       </div>
                       <div className="text-ink-450">
                         {formatDate(tx.createdAt)}
+                        {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
                         {tx.createdBy && ` · by ${tx.createdBy.name}`}
                       </div>
                     </div>

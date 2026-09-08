@@ -316,7 +316,7 @@ export class PartnerService {
         take: 100,
         include: {
           createdBy: { select: { name: true } },
-          organization: { select: { name: true } },
+          organization: { select: { name: true, customerNumber: true } },
           plan: { select: { name: true } },
         },
       }),
