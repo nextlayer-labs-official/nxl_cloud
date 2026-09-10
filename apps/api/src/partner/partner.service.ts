@@ -141,6 +141,12 @@ export class PartnerService {
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
 
+    const partner = await prisma.partner.findUniqueOrThrow({
+      where: { id: partnerId },
+      select: { distributorId: true },
+    });
+    const distributorId = partner.distributorId;
+
     const existingSubscription = await prisma.subscription.findUnique({
       where: { organizationId },
       include: { plan: true },
@@ -182,12 +188,32 @@ export class PartnerService {
         existingSubscription!.currentPeriodEnd!,
       );
 
+      // If this partner belongs to a distributor, the distributor's wallet is
+      // also charged its own rate for the same change, in the same transaction.
+      const distributorNetCents = distributorId
+        ? this.computeProration(
+            (await this.resolveDistributorRate(distributorId, existingSubscription!.plan, cycle)) ?? 0,
+            (await this.resolveDistributorRate(distributorId, plan, cycle)) ?? 0,
+            cycle,
+            existingSubscription!.currentPeriodEnd!,
+          )
+        : 0;
+
       return prisma.$transaction(async (tx) => {
         await this.debitWallet(tx, partnerId, netCents, {
           organizationId,
           planId: plan.id,
           note: `Upgraded ${org.name} to ${plan.name} (prorated)`,
+          hasDistributor: !!distributorId,
         });
+        if (distributorId) {
+          await this.debitDistributorWallet(tx, distributorId, distributorNetCents, {
+            partnerId,
+            organizationId,
+            planId: plan.id,
+            note: `${org.name} upgraded to ${plan.name} (prorated)`,
+          });
+        }
         return tx.subscription.update({
           where: { organizationId },
           data: {
@@ -205,12 +231,24 @@ export class PartnerService {
     // change made after the previous period already lapsed — full price,
     // fresh period, same as BillingService.createOrder's equivalent branch.
     const listPrice = await this.resolvePartnerPrice(partnerId, plan, dto.billingCycle);
+    const distributorFullRate = distributorId
+      ? await this.resolveDistributorRate(distributorId, plan, dto.billingCycle)
+      : null;
     return prisma.$transaction(async (tx) => {
       await this.debitWallet(tx, partnerId, listPrice ?? 0, {
         organizationId,
         planId: plan.id,
         note: `Set ${org.name} to ${plan.name}`,
+        hasDistributor: !!distributorId,
       });
+      if (distributorId) {
+        await this.debitDistributorWallet(tx, distributorId, distributorFullRate ?? 0, {
+          partnerId,
+          organizationId,
+          planId: plan.id,
+          note: `${org.name} set to ${plan.name}`,
+        });
+      }
       return tx.subscription.upsert({
         where: { organizationId },
         create: {
@@ -228,6 +266,67 @@ export class PartnerService {
         },
         include: { plan: true },
       });
+    });
+  }
+
+  /** The distributor's admin-set rate for a plan, or the plan's list price if unset — the middle level of the pricing chain, charged to the distributor's wallet on a metered debit. */
+  private async resolveDistributorRate(
+    distributorId: string,
+    plan: { id: string; priceMonthlyCents: number | null; priceYearlyCents: number | null },
+    billingCycle: "MONTHLY" | "ANNUAL",
+  ) {
+    const override = await prisma.distributorPlanPrice.findUnique({
+      where: { distributorId_planId: { distributorId, planId: plan.id } },
+    });
+    if (billingCycle === "ANNUAL") return override?.priceYearlyCents ?? plan.priceYearlyCents;
+    return override?.priceMonthlyCents ?? plan.priceMonthlyCents;
+  }
+
+  /**
+   * Debits the distributor's wallet in the caller's transaction — same
+   * atomic guarded-decrement primitive as debitWallet, one tier up. Throws
+   * (rolling back the whole transaction, so the plan change doesn't happen
+   * either) if the distributor's account isn't enabled for billing or its
+   * balance can't cover the charge. A zero/negative amount is a no-op.
+   */
+  private async debitDistributorWallet(
+    tx: Tx,
+    distributorId: string,
+    amountCents: number,
+    context: { partnerId: string; organizationId: string; planId: string; note: string },
+  ) {
+    if (amountCents <= 0) return;
+
+    const distributor = await tx.distributor.findUniqueOrThrow({ where: { id: distributorId } });
+    if (!distributor.creditEnabled) {
+      throw new BadRequestException(
+        "Your distributor's account isn't active for billing yet — ask them to contact the platform admin.",
+      );
+    }
+
+    const result = await tx.distributor.updateMany({
+      where: { id: distributorId, walletBalanceCents: { gte: amountCents } },
+      data: { walletBalanceCents: { decrement: amountCents } },
+    });
+    if (result.count === 0) {
+      const shortByCents = amountCents - distributor.walletBalanceCents;
+      throw new BadRequestException(
+        `Your distributor's wallet is short by ₹${(shortByCents / 100).toFixed(2)} for this change — ask them to top it up.`,
+      );
+    }
+
+    const updated = await tx.distributor.findUniqueOrThrow({ where: { id: distributorId } });
+    await tx.distributorWalletTransaction.create({
+      data: {
+        distributorId,
+        type: "DEBIT",
+        amountCents,
+        balanceAfterCents: updated.walletBalanceCents,
+        note: context.note,
+        partnerId: context.partnerId,
+        organizationId: context.organizationId,
+        planId: context.planId,
+      },
     });
   }
 
@@ -294,7 +393,7 @@ export class PartnerService {
     tx: Tx,
     partnerId: string,
     amountCents: number,
-    context: { organizationId: string; planId: string; note: string },
+    context: { organizationId: string; planId: string; note: string; hasDistributor?: boolean },
   ) {
     if (amountCents <= 0) return;
 
@@ -305,8 +404,9 @@ export class PartnerService {
     if (result.count === 0) {
       const partner = await tx.partner.findUniqueOrThrow({ where: { id: partnerId } });
       const shortByCents = amountCents - partner.walletBalanceCents;
+      const topUpContact = context.hasDistributor ? "your distributor" : "admin";
       throw new BadRequestException(
-        `Insufficient wallet balance — you need ₹${(shortByCents / 100).toFixed(2)} more. Contact admin to top up your wallet.`,
+        `Insufficient wallet balance — you need ₹${(shortByCents / 100).toFixed(2)} more. Contact ${topUpContact} to top up your wallet.`,
       );
     }
 

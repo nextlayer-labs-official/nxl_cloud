@@ -130,18 +130,19 @@ model Organization {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  memberships          Membership[]
-  teams                Team[]
-  folders              Folder[]
-  files                File[]
-  auditLogs            AuditLog[]
-  subscription         Subscription?
-  payments             Payment[]
-  ssoConnection        SsoConnection?
-  stars                Star[]
-  partner              Partner?                   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
-  partnerChangeRequest PartnerChangeRequest?
-  partnerWalletDebits  PartnerWalletTransaction[]
+  memberships             Membership[]
+  teams                   Team[]
+  folders                 Folder[]
+  files                   File[]
+  auditLogs               AuditLog[]
+  subscription            Subscription?
+  payments                Payment[]
+  ssoConnection           SsoConnection?
+  stars                   Star[]
+  partner                 Partner?                       @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  partnerChangeRequest    PartnerChangeRequest?
+  partnerWalletDebits     PartnerWalletTransaction[]
+  distributorWalletDebits DistributorWalletTransaction[]
 }
 
 model Membership {
@@ -608,11 +609,17 @@ model DistributorWalletTransaction {
   note              String?
   createdByAdminId  String?
   partnerId         String?
+  /// Set on a metered DEBIT — the customer + plan whose activation charged
+  /// this distributor's wallet (alongside the partner's own wallet debit).
+  organizationId    String?
+  planId            String?
   createdAt         DateTime                     @default(now())
 
-  distributor    Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
-  createdByAdmin AdminUser?  @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
-  partner        Partner?    @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  distributor    Distributor   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  createdByAdmin AdminUser?    @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  partner        Partner?      @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  plan           Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
 
   @@index([distributorId, createdAt])
 }
@@ -662,11 +669,12 @@ model Plan {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  subscriptions       Subscription[]
-  payments            Payment[]
-  partnerPrices       PartnerPlanPrice[]
-  partnerWalletDebits PartnerWalletTransaction[]
-  distributorPrices   DistributorPlanPrice[]
+  subscriptions           Subscription[]
+  payments                Payment[]
+  partnerPrices           PartnerPlanPrice[]
+  partnerWalletDebits     PartnerWalletTransaction[]
+  distributorPrices       DistributorPlanPrice[]
+  distributorWalletDebits DistributorWalletTransaction[]
 }
 
 model Subscription {

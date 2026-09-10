@@ -46,6 +46,8 @@ export class DistributorService {
         include: {
           createdByAdmin: { select: { name: true } },
           partner: { select: { name: true } },
+          organization: { select: { name: true, customerNumber: true } },
+          plan: { select: { name: true } },
         },
       }),
     ]);
