@@ -202,9 +202,12 @@ export function DistributorDetailView({ distributorId }: { distributorId: string
 
       <div className="border-border-subtle mb-6 flex items-center justify-between gap-4 rounded-xl border p-4">
         <div>
-          <div className="text-foreground text-[14px] font-semibold">Partner wallet funding</div>
+          <div className="text-foreground text-[14px] font-semibold">
+            Negative balance (credit) — {distributor.creditEnabled ? "allowed" : "not allowed"}
+          </div>
           <p className="text-ink-450 text-[12px]">
-            While off, this distributor can&apos;t push wallet funds to its partners, even with a balance.
+            While allowed, this distributor&apos;s wallet may go below zero — the negative amount is credit
+            they owe and must settle. While off, the wallet is strictly prepaid.
           </p>
         </div>
         <button
@@ -218,7 +221,7 @@ export function DistributorDetailView({ distributorId }: { distributorId: string
               : "border-input hover:bg-surface-muted",
           )}
         >
-          {distributor.creditEnabled ? "Disable funding" : "Enable funding"}
+          {distributor.creditEnabled ? "Disallow negative balance" : "Allow negative balance"}
         </button>
       </div>
 

@@ -94,7 +94,6 @@ export interface DistributorPartnerWalletTransaction {
   note: string | null;
   createdAt: string;
   createdBy: { name: string } | null;
-  createdByDistributor: { name: string } | null;
   organization: { name: string; customerNumber: number } | null;
   plan: { name: string } | null;
 }

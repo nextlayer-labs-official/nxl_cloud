@@ -404,7 +404,6 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
                       <div className="text-ink-450">
                         {formatDate(tx.createdAt)}
                         {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
-                        {tx.createdByDistributor && ` · from ${tx.createdByDistributor.name}`}
                         {tx.createdBy && ` · by ${tx.createdBy.name}`}
                       </div>
                     </div>

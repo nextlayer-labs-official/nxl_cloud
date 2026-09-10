@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { hashPassword } from "../auth/password.util";
 import type { CreatePartnerDto } from "../admin/dto/create-partner.dto";
@@ -10,10 +10,7 @@ const BYTES_PER_GB = 1024 * 1024 * 1024;
 /**
  * A distributor manages its own set of partners — the same surface an admin
  * has over partners today (`AdminService`'s "Partners (resellers)" section),
- * but every query is scoped to `distributorId`. The one genuinely new
- * mechanic is `fundPartnerWallet`: a distributor moves money from its own
- * prepaid wallet into a partner's, mirroring `PartnerService.debitWallet`'s
- * atomic guarded-decrement one tier up.
+ * but every query is scoped to `distributorId`.
  */
 @Injectable()
 export class DistributorService {
@@ -23,10 +20,6 @@ export class DistributorService {
   ): number | null {
     const gb = subscription?.storageLimitGbOverride ?? subscription?.plan.storageLimitGb ?? null;
     return gb !== null ? gb * BYTES_PER_GB : null;
-  }
-
-  private async getDistributor(distributorId: string) {
-    return prisma.distributor.findUniqueOrThrow({ where: { id: distributorId } });
   }
 
   /** Scopes every partner action to a partner actually onboarded by this distributor. */
@@ -261,7 +254,6 @@ export class DistributorService {
       take: 100,
       include: {
         createdBy: { select: { name: true } },
-        createdByDistributor: { select: { name: true } },
         organization: { select: { name: true, customerNumber: true } },
         plan: { select: { name: true } },
       },
@@ -270,43 +262,19 @@ export class DistributorService {
   }
 
   /**
-   * Moves `dto.amountCents` from this distributor's wallet into the partner's,
-   * atomically. Gated on `creditEnabled` and sufficient distributor balance —
-   * the guarded `updateMany` decrement is the same concurrency-safe primitive
-   * `PartnerService.debitWallet` uses. Writes both ledgers: a distributor
-   * DEBIT (with `partnerId`) and a partner CREDIT (with `createdByDistributorId`).
+   * Credits one of this distributor's partners' wallets — a manual top-up
+   * against payment the distributor collected from the partner off-platform
+   * (`note` carries the bank ref / cheque number). Does NOT touch the
+   * distributor's own wallet; it's a plain increment on the partner's
+   * balance, exactly like AdminService.creditPartnerWallet. Not gated by
+   * `creditEnabled` — that flag only governs whether the distributor's own
+   * wallet may go negative, which this action doesn't affect.
    */
-  async fundPartnerWallet(distributorId: string, partnerId: string, dto: CreditPartnerWalletDto) {
-    const partner = await this.requireOwnPartner(distributorId, partnerId);
-    const distributor = await this.getDistributor(distributorId);
-    if (!distributor.creditEnabled) {
-      throw new ForbiddenException("Wallet funding isn't enabled for your account yet — contact the platform admin.");
-    }
+  async creditPartnerWallet(distributorId: string, partnerId: string, dto: CreditPartnerWalletDto) {
+    await this.requireOwnPartner(distributorId, partnerId);
+    const distributor = await prisma.distributor.findUniqueOrThrow({ where: { id: distributorId } });
 
     return prisma.$transaction(async (tx) => {
-      const decremented = await tx.distributor.updateMany({
-        where: { id: distributorId, walletBalanceCents: { gte: dto.amountCents } },
-        data: { walletBalanceCents: { decrement: dto.amountCents } },
-      });
-      if (decremented.count === 0) {
-        const shortByCents = dto.amountCents - distributor.walletBalanceCents;
-        throw new BadRequestException(
-          `Insufficient wallet balance — you need ₹${(shortByCents / 100).toFixed(2)} more. Contact the platform admin to top up your wallet.`,
-        );
-      }
-
-      const distributorAfter = await tx.distributor.findUniqueOrThrow({ where: { id: distributorId } });
-      await tx.distributorWalletTransaction.create({
-        data: {
-          distributorId,
-          type: "DEBIT",
-          amountCents: dto.amountCents,
-          balanceAfterCents: distributorAfter.walletBalanceCents,
-          note: dto.note?.trim() || `Funded ${partner.name}'s wallet`,
-          partnerId,
-        },
-      });
-
       const partnerAfter = await tx.partner.update({
         where: { id: partnerId },
         data: { walletBalanceCents: { increment: dto.amountCents } },
@@ -317,12 +285,10 @@ export class DistributorService {
           type: "CREDIT",
           amountCents: dto.amountCents,
           balanceAfterCents: partnerAfter.walletBalanceCents,
-          note: dto.note?.trim() || null,
-          createdByDistributorId: distributorId,
+          note: dto.note?.trim() || `Credited by ${distributor.name}`,
         },
       });
-
-      return { partnerWalletBalanceCents: partnerAfter.walletBalanceCents, walletBalanceCents: distributorAfter.walletBalanceCents };
+      return { walletBalanceCents: partnerAfter.walletBalanceCents };
     });
   }
 }

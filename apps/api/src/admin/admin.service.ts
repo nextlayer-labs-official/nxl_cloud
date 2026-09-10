@@ -803,7 +803,6 @@ export class AdminService {
       take: 100,
       include: {
         createdBy: { select: { name: true, email: true } },
-        createdByDistributor: { select: { name: true } },
         organization: { select: { name: true, slug: true, customerNumber: true } },
         plan: { select: { name: true } },
       },

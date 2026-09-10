@@ -47,8 +47,8 @@ export function NewDistributorModal({ onClose, onCreated }: NewDistributorModalP
       >
         <h2 className="text-foreground mb-1 text-[17px] font-semibold">Onboard distributor</h2>
         <p className="text-ink-450 mb-5 text-[13px]">
-          Creates a distributor login. They onboard and manage their own partners, drawing from a wallet
-          you fund.
+          Creates a distributor login. They onboard and manage their own partners against a prepaid wallet
+          you credit.
         </p>
 
         <div className="flex flex-col gap-4">

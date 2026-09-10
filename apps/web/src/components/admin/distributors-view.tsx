@@ -103,7 +103,7 @@ export function DistributorsView() {
               <tr className="border-border-subtle bg-surface-muted border-b text-[12px]">
                 <th className="text-ink-550 px-4 py-3 font-semibold">Distributor</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Status</th>
-                <th className="text-ink-550 px-4 py-3 font-semibold">Funding</th>
+                <th className="text-ink-550 px-4 py-3 font-semibold">Neg. balance</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Partners</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Wallet</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Onboarded</th>
@@ -145,7 +145,7 @@ export function DistributorsView() {
                     </span>
                   </td>
                   <td className="text-ink-450 px-4 py-3 text-[13px]">
-                    {distributor.creditEnabled ? "Enabled" : "Disabled"}
+                    {distributor.creditEnabled ? "Allowed" : "Prepaid only"}
                   </td>
                   <td className="px-4 py-3">{distributor.partnerCount}</td>
                   <td className="px-4 py-3 font-medium">

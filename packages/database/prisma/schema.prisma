@@ -471,26 +471,22 @@ enum PartnerWalletTransactionType {
 /// `balanceAfterCents` snapshots the running balance right after this row, so
 /// history renders without re-summing every prior row.
 model PartnerWalletTransaction {
-  id                     String                       @id @default(cuid())
-  partnerId              String
-  type                   PartnerWalletTransactionType
-  amountCents            Int
-  balanceAfterCents      Int
-  note                   String?
-  /// The admin who made a manual top-up (CREDIT). Mutually exclusive with
-  /// `createdByDistributorId` — a CREDIT row has exactly one funding source.
-  createdById            String?
-  /// The distributor who funded this partner from their own wallet (CREDIT).
-  createdByDistributorId String?
-  organizationId         String?
-  planId                 String?
-  createdAt              DateTime                     @default(now())
+  id                String                       @id @default(cuid())
+  partnerId         String
+  type              PartnerWalletTransactionType
+  amountCents       Int
+  balanceAfterCents Int
+  note              String?
+  /// The admin who made a manual top-up (CREDIT).
+  createdById       String?
+  organizationId    String?
+  planId            String?
+  createdAt         DateTime                     @default(now())
 
-  partner              Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  createdBy            AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  createdByDistributor Distributor?  @relation(fields: [createdByDistributorId], references: [id], onDelete: SetNull)
-  organization         Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  plan                 Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
+  partner      Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  createdBy    AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  plan         Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
 
   @@index([partnerId, createdAt])
 }
@@ -574,11 +570,10 @@ model Distributor {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  sessions             DistributorSession[]
-  partners             Partner[]
-  planPrices           DistributorPlanPrice[]
-  walletTransactions   DistributorWalletTransaction[]
-  partnerWalletCredits PartnerWalletTransaction[]
+  sessions           DistributorSession[]
+  partners           Partner[]
+  planPrices         DistributorPlanPrice[]
+  walletTransactions DistributorWalletTransaction[]
 }
 
 model DistributorSession {

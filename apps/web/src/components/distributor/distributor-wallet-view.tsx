@@ -23,9 +23,7 @@ export function DistributorWalletView() {
   return (
     <div>
       <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">Wallet</h1>
-      <p className="text-ink-450 mb-6 text-sm">
-        Prepaid by the platform admin. You draw from this to fund your partners&apos; wallets.
-      </p>
+      <p className="text-ink-450 mb-6 text-sm">Prepaid by the platform admin.</p>
 
       <div className="border-border-subtle bg-surface-muted-2 mb-6 flex items-center justify-between rounded-xl border p-5">
         <div>
@@ -40,7 +38,7 @@ export function DistributorWalletView() {
             wallet.creditEnabled ? "bg-success-bg text-success" : "bg-error-bg text-error-text",
           )}
         >
-          {wallet.creditEnabled ? "Funding enabled" : "Funding disabled"}
+          {wallet.creditEnabled ? "Negative balance allowed" : "Prepaid only"}
         </span>
       </div>
 

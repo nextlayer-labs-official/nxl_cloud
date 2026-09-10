@@ -189,7 +189,6 @@ export interface AdminPartnerWalletTransaction {
   note: string | null;
   createdAt: string;
   createdBy: { name: string; email: string } | null;
-  createdByDistributor: { name: string } | null;
   organization: { name: string; slug: string; customerNumber: number } | null;
   plan: { name: string } | null;
 }

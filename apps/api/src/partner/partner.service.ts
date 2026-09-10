@@ -141,12 +141,6 @@ export class PartnerService {
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
 
-    const partner = await prisma.partner.findUniqueOrThrow({
-      where: { id: partnerId },
-      select: { distributorId: true },
-    });
-    const distributorId = partner.distributorId;
-
     const existingSubscription = await prisma.subscription.findUnique({
       where: { organizationId },
       include: { plan: true },
@@ -193,7 +187,6 @@ export class PartnerService {
           organizationId,
           planId: plan.id,
           note: `Upgraded ${org.name} to ${plan.name} (prorated)`,
-          hasDistributor: !!distributorId,
         });
         return tx.subscription.update({
           where: { organizationId },
@@ -217,7 +210,6 @@ export class PartnerService {
         organizationId,
         planId: plan.id,
         note: `Set ${org.name} to ${plan.name}`,
-        hasDistributor: !!distributorId,
       });
       return tx.subscription.upsert({
         where: { organizationId },
@@ -302,7 +294,7 @@ export class PartnerService {
     tx: Tx,
     partnerId: string,
     amountCents: number,
-    context: { organizationId: string; planId: string; note: string; hasDistributor?: boolean },
+    context: { organizationId: string; planId: string; note: string },
   ) {
     if (amountCents <= 0) return;
 
@@ -313,9 +305,8 @@ export class PartnerService {
     if (result.count === 0) {
       const partner = await tx.partner.findUniqueOrThrow({ where: { id: partnerId } });
       const shortByCents = amountCents - partner.walletBalanceCents;
-      const topUpContact = context.hasDistributor ? "your distributor" : "admin";
       throw new BadRequestException(
-        `Insufficient wallet balance — you need ₹${(shortByCents / 100).toFixed(2)} more. Contact ${topUpContact} to top up your wallet.`,
+        `Insufficient wallet balance — you need ₹${(shortByCents / 100).toFixed(2)} more. Contact admin to top up your wallet.`,
       );
     }
 
@@ -343,7 +334,6 @@ export class PartnerService {
         take: 100,
         include: {
           createdBy: { select: { name: true } },
-          createdByDistributor: { select: { name: true } },
           organization: { select: { name: true, customerNumber: true } },
           plan: { select: { name: true } },
         },

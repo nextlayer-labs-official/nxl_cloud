@@ -11,9 +11,8 @@ import type {
   DistributorPartnerPricingRow,
   DistributorPartnerUsageSummary,
   DistributorPartnerWallet,
-  DistributorWallet,
 } from "@/types/distributor";
-import { FundPartnerWalletModal } from "./fund-partner-wallet-modal";
+import { CreditPartnerWalletModal } from "./credit-partner-wallet-modal";
 
 function centsToInput(cents: number | null): string {
   return cents === null ? "" : (cents / 100).toString();
@@ -158,11 +157,10 @@ export function DistributorPartnerDetailView({ partnerId }: { partnerId: string 
   const [pricing, setPricing] = useState<DistributorPartnerPricingRow[] | null>(null);
   const [wallet, setWallet] = useState<DistributorPartnerWallet | null>(null);
   const [usageSummary, setUsageSummary] = useState<DistributorPartnerUsageSummary | null>(null);
-  const [ownWallet, setOwnWallet] = useState<DistributorWallet | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [tab, setTab] = useState<DetailTab>("customers");
-  const [funding, setFunding] = useState(false);
+  const [crediting, setCrediting] = useState(false);
 
   function load() {
     Promise.all([
@@ -170,14 +168,12 @@ export function DistributorPartnerDetailView({ partnerId }: { partnerId: string 
       api.get<DistributorPartnerPricingRow[]>(`/distributor/partners/${partnerId}/pricing`),
       api.get<DistributorPartnerWallet>(`/distributor/partners/${partnerId}/wallet`),
       api.get<DistributorPartnerUsageSummary>(`/distributor/partners/${partnerId}/usage-summary`),
-      api.get<DistributorWallet>("/distributor/wallet"),
     ])
-      .then(([partnerData, pricingData, walletData, usageData, ownWalletData]) => {
+      .then(([partnerData, pricingData, walletData, usageData]) => {
         setPartner(partnerData);
         setPricing(pricingData);
         setWallet(walletData);
         setUsageSummary(usageData);
-        setOwnWallet(ownWalletData);
       })
       .catch(() => setError("Couldn't load this partner."));
   }
@@ -354,11 +350,11 @@ export function DistributorPartnerDetailView({ partnerId }: { partnerId: string 
             </div>
             <button
               type="button"
-              onClick={() => setFunding(true)}
+              onClick={() => setCrediting(true)}
               className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold"
             >
               <Plus className="h-4 w-4" />
-              Fund from your wallet
+              Credit wallet
             </button>
           </div>
 
@@ -382,7 +378,6 @@ export function DistributorPartnerDetailView({ partnerId }: { partnerId: string 
                       <div className="text-ink-450">
                         {formatDate(tx.createdAt)}
                         {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
-                        {tx.createdByDistributor && ` · by ${tx.createdByDistributor.name}`}
                         {tx.createdBy && ` · by ${tx.createdBy.name}`}
                       </div>
                     </div>
@@ -402,15 +397,13 @@ export function DistributorPartnerDetailView({ partnerId }: { partnerId: string 
         </div>
       )}
 
-      {funding && (
-        <FundPartnerWalletModal
+      {crediting && (
+        <CreditPartnerWalletModal
           partnerId={partnerId}
           partnerName={partner.name}
-          availableCents={ownWallet?.balanceCents ?? 0}
-          creditEnabled={ownWallet?.creditEnabled ?? false}
-          onClose={() => setFunding(false)}
-          onFunded={() => {
-            setFunding(false);
+          onClose={() => setCrediting(false)}
+          onCredited={() => {
+            setCrediting(false);
             load();
           }}
         />

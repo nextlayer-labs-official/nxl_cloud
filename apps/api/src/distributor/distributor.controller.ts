@@ -69,8 +69,8 @@ export class DistributorController {
   }
 
   @Post("partners/:id/wallet/credit")
-  fundPartnerWallet(@Req() req: Request, @Param("id") id: string, @Body() dto: CreditPartnerWalletDto) {
-    return this.distributorService.fundPartnerWallet(req.distributor!.id, id, dto);
+  creditPartnerWallet(@Req() req: Request, @Param("id") id: string, @Body() dto: CreditPartnerWalletDto) {
+    return this.distributorService.creditPartnerWallet(req.distributor!.id, id, dto);
   }
 
   @Get("partners/:id/usage-summary")
