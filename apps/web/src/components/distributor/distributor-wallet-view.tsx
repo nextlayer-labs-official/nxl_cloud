@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
-import { formatCustomerCode, formatDate } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DistributorWallet } from "@/types/distributor";
 
@@ -61,8 +61,7 @@ export function DistributorWalletView() {
                   </div>
                   <div className="text-ink-450">
                     {formatDate(tx.createdAt)}
-                    {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
-                    {tx.type === "DEBIT" && tx.partner && ` · via ${tx.partner.name}`}
+                    {tx.type === "DEBIT" && tx.partner && ` · ${tx.partner.name}`}
                     {tx.type === "CREDIT" && tx.createdByAdmin && ` · by ${tx.createdByAdmin.name}`}
                   </div>
                 </div>

@@ -27,9 +27,6 @@ export interface DistributorWalletTransaction {
   createdAt: string;
   createdByAdmin: { name: string } | null;
   partner: { name: string } | null;
-  /** Set on a metered debit — the customer + plan whose activation charged this wallet. */
-  organization: { name: string; customerNumber: number } | null;
-  plan: { name: string } | null;
 }
 
 export interface DistributorWallet {
