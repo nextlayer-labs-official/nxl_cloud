@@ -129,6 +129,8 @@ export interface AdminPartner {
   createdAt: string;
   organizationCount: number;
   walletBalanceCents: number;
+  /** null = a direct partner (admin-managed); set = onboarded by this distributor. */
+  distributor: { id: string; name: string } | null;
 }
 
 export interface AdminPartnerDetail {
@@ -139,6 +141,7 @@ export interface AdminPartnerDetail {
   suspendedAt: string | null;
   createdAt: string;
   walletBalanceCents: number;
+  distributor: { id: string; name: string } | null;
   organizations: {
     id: string;
     customerNumber: number;
@@ -186,6 +189,7 @@ export interface AdminPartnerWalletTransaction {
   note: string | null;
   createdAt: string;
   createdBy: { name: string; email: string } | null;
+  createdByDistributor: { name: string } | null;
   organization: { name: string; slug: string; customerNumber: number } | null;
   plan: { name: string } | null;
 }
@@ -193,6 +197,64 @@ export interface AdminPartnerWalletTransaction {
 export interface AdminPartnerWallet {
   balanceCents: number;
   transactions: AdminPartnerWalletTransaction[];
+}
+
+// --- Distributors ---
+
+export interface AdminDistributor {
+  id: string;
+  name: string;
+  email: string;
+  suspendedAt: string | null;
+  creditEnabled: boolean;
+  createdAt: string;
+  partnerCount: number;
+  walletBalanceCents: number;
+}
+
+export interface AdminDistributorDetail {
+  id: string;
+  name: string;
+  email: string;
+  suspendedAt: string | null;
+  creditEnabled: boolean;
+  createdAt: string;
+  walletBalanceCents: number;
+  partners: {
+    id: string;
+    name: string;
+    email: string;
+    code: string;
+    suspendedAt: string | null;
+    createdAt: string;
+    organizationCount: number;
+    walletBalanceCents: number;
+  }[];
+}
+
+export interface AdminDistributorPricingRow {
+  planId: string;
+  planName: string;
+  listPriceMonthlyCents: number | null;
+  listPriceYearlyCents: number | null;
+  distributorPriceMonthlyCents: number | null;
+  distributorPriceYearlyCents: number | null;
+}
+
+export interface AdminDistributorWalletTransaction {
+  id: string;
+  type: PartnerWalletTransactionType;
+  amountCents: number;
+  balanceAfterCents: number;
+  note: string | null;
+  createdAt: string;
+  createdByAdmin: { name: string; email: string } | null;
+  partner: { name: string } | null;
+}
+
+export interface AdminDistributorWallet {
+  balanceCents: number;
+  transactions: AdminDistributorWalletTransaction[];
 }
 
 export interface AdminAuditLogEntry {

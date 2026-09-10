@@ -268,6 +268,7 @@ function WalletTab({ wallet }: { wallet: PartnerWallet | null }) {
                   <div className="text-ink-450">
                     {formatDate(tx.createdAt)}
                     {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
+                    {tx.createdByDistributor && ` · from ${tx.createdByDistributor.name}`}
                     {tx.createdBy && ` · added by ${tx.createdBy.name}`}
                   </div>
                 </div>

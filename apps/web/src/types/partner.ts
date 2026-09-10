@@ -62,6 +62,8 @@ export interface PartnerWalletTransaction {
   note: string | null;
   createdAt: string;
   createdBy: { name: string } | null;
+  /** Set when this top-up came from the partner's distributor rather than an admin. */
+  createdByDistributor: { name: string } | null;
   organization: { name: string; customerNumber: number } | null;
   plan: { name: string } | null;
 }

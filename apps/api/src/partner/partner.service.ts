@@ -255,13 +255,31 @@ export class PartnerService {
     });
   }
 
-  /** This partner's negotiated price for the plan, or the plan's list price if none was set — see PartnerPlanPrice. */
+  /**
+   * What this plan costs this partner's wallet, resolved as a 3-level chain:
+   * the partner's own per-plan override (PartnerPlanPrice), then — if this
+   * partner belongs to a distributor — that distributor's rate for the plan
+   * (DistributorPlanPrice), then the plan's own list price. A direct partner
+   * (no distributor) just resolves the usual 2 levels.
+   */
   private async resolvePartnerPrice(partnerId: string, plan: { id: string; priceMonthlyCents: number | null; priceYearlyCents: number | null }, billingCycle: "MONTHLY" | "ANNUAL") {
-    const override = await prisma.partnerPlanPrice.findUnique({
-      where: { partnerId_planId: { partnerId, planId: plan.id } },
-    });
-    if (billingCycle === "ANNUAL") return override?.priceYearlyCents ?? plan.priceYearlyCents;
-    return override?.priceMonthlyCents ?? plan.priceMonthlyCents;
+    const annual = billingCycle === "ANNUAL";
+    const [partner, override] = await Promise.all([
+      prisma.partner.findUnique({ where: { id: partnerId }, select: { distributorId: true } }),
+      prisma.partnerPlanPrice.findUnique({ where: { partnerId_planId: { partnerId, planId: plan.id } } }),
+    ]);
+    const partnerPrice = annual ? override?.priceYearlyCents : override?.priceMonthlyCents;
+    if (partnerPrice != null) return partnerPrice;
+
+    if (partner?.distributorId) {
+      const distributorPrice = await prisma.distributorPlanPrice.findUnique({
+        where: { distributorId_planId: { distributorId: partner.distributorId, planId: plan.id } },
+      });
+      const rate = annual ? distributorPrice?.priceYearlyCents : distributorPrice?.priceMonthlyCents;
+      if (rate != null) return rate;
+    }
+
+    return annual ? plan.priceYearlyCents : plan.priceMonthlyCents;
   }
 
   /**
@@ -316,6 +334,7 @@ export class PartnerService {
         take: 100,
         include: {
           createdBy: { select: { name: true } },
+          createdByDistributor: { select: { name: true } },
           organization: { select: { name: true, customerNumber: true } },
           plan: { select: { name: true } },
         },

@@ -6,15 +6,15 @@ import { Loader2, Plus, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { AdminPartner } from "@/types/admin";
-import { NewPartnerModal } from "./new-partner-modal";
+import type { AdminDistributor } from "@/types/admin";
+import { NewDistributorModal } from "./new-distributor-modal";
 
 function initials(name: string): string {
   return name.slice(0, 1).toUpperCase();
 }
 
-export function PartnersView() {
-  const [partners, setPartners] = useState<AdminPartner[] | null>(null);
+export function DistributorsView() {
+  const [distributors, setDistributors] = useState<AdminDistributor[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -22,19 +22,19 @@ export function PartnersView() {
 
   function load() {
     api
-      .get<AdminPartner[]>("/admin/partners")
-      .then(setPartners)
-      .catch(() => setError("Couldn't load partners."));
+      .get<AdminDistributor[]>("/admin/distributors")
+      .then(setDistributors)
+      .catch(() => setError("Couldn't load distributors."));
   }
 
   useEffect(load, []);
 
-  async function toggleSuspend(partner: AdminPartner) {
-    setPendingId(partner.id);
+  async function toggleSuspend(distributor: AdminDistributor) {
+    setPendingId(distributor.id);
     try {
-      const path = partner.suspendedAt
-        ? `/admin/partners/${partner.id}/reactivate`
-        : `/admin/partners/${partner.id}/suspend`;
+      const path = distributor.suspendedAt
+        ? `/admin/distributors/${distributor.id}/reactivate`
+        : `/admin/distributors/${distributor.id}/suspend`;
       await api.post(path);
       load();
     } finally {
@@ -43,24 +43,22 @@ export function PartnersView() {
   }
 
   const filtered = useMemo(() => {
-    if (!partners) return null;
+    if (!distributors) return null;
     const q = query.trim().toLowerCase();
-    if (!q) return partners;
-    return partners.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.email.toLowerCase().includes(q) ||
-        p.code.toLowerCase().includes(q),
+    if (!q) return distributors;
+    return distributors.filter(
+      (d) => d.name.toLowerCase().includes(q) || d.email.toLowerCase().includes(q),
     );
-  }, [partners, query]);
+  }, [distributors, query]);
 
   return (
     <div>
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">Partners</h1>
+          <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">Distributors</h1>
           <p className="text-ink-450 text-sm">
-            Resellers who manage billing for their mapped customers — {partners?.length ?? "…"} total.
+            One tier above partners — they onboard and fund their own resellers. {distributors?.length ?? "…"}{" "}
+            total.
           </p>
         </div>
         <button
@@ -69,16 +67,16 @@ export function PartnersView() {
           className="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold"
         >
           <Plus className="h-4 w-4" />
-          Onboard partner
+          Onboard distributor
         </button>
       </div>
 
-      <div className="mb-5 border-input bg-background flex w-full max-w-xs items-center gap-2 rounded-lg border px-3 py-2">
+      <div className="border-input bg-background mb-5 flex w-full max-w-xs items-center gap-2 rounded-lg border px-3 py-2">
         <Search className="text-ink-400 h-4 w-4 shrink-0" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, email, or code…"
+          placeholder="Search by name or email…"
           className="text-foreground placeholder:text-ink-450 min-w-0 flex-1 bg-transparent text-sm outline-none"
         />
       </div>
@@ -90,11 +88,11 @@ export function PartnersView() {
       ) : filtered.length === 0 ? (
         <div className="border-border-subtle rounded-xl border border-dashed py-16 text-center">
           <p className="text-foreground text-[15px] font-semibold">
-            {partners?.length === 0 ? "No partners yet" : "No partners match"}
+            {distributors?.length === 0 ? "No distributors yet" : "No distributors match"}
           </p>
           <p className="text-ink-450 mt-1 text-sm">
-            {partners?.length === 0
-              ? "Onboard a reseller to let them manage their own customers' plans."
+            {distributors?.length === 0
+              ? "Onboard a distributor to let them run their own set of partners."
               : "Try a different search."}
           </p>
         </div>
@@ -103,71 +101,72 @@ export function PartnersView() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-border-subtle bg-surface-muted border-b text-[12px]">
-                <th className="text-ink-550 px-4 py-3 font-semibold">Partner</th>
-                <th className="text-ink-550 px-4 py-3 font-semibold">Code</th>
-                <th className="text-ink-550 px-4 py-3 font-semibold">Via</th>
+                <th className="text-ink-550 px-4 py-3 font-semibold">Distributor</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Status</th>
-                <th className="text-ink-550 px-4 py-3 font-semibold">Customers</th>
+                <th className="text-ink-550 px-4 py-3 font-semibold">Funding</th>
+                <th className="text-ink-550 px-4 py-3 font-semibold">Partners</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Wallet</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Onboarded</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold" />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((partner) => (
+              {filtered.map((distributor) => (
                 <tr
-                  key={partner.id}
+                  key={distributor.id}
                   className="border-border-subtle hover:bg-surface-muted/50 border-b last:border-0"
                 >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/partners/${partner.id}`} className="flex items-center gap-2.5">
+                    <Link
+                      href={`/admin/distributors/${distributor.id}`}
+                      className="flex items-center gap-2.5"
+                    >
                       <div className="bg-primary text-primary-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold">
-                        {initials(partner.name)}
+                        {initials(distributor.name)}
                       </div>
                       <div className="min-w-0">
                         <div className="text-foreground truncate font-semibold hover:underline">
-                          {partner.name}
+                          {distributor.name}
                         </div>
-                        <div className="text-ink-450 truncate text-[12px]">{partner.email}</div>
+                        <div className="text-ink-450 truncate text-[12px]">{distributor.email}</div>
                       </div>
                     </Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <code className="bg-surface-muted rounded px-1.5 py-0.5 text-[12px] font-semibold">
-                      {partner.code}
-                    </code>
-                  </td>
-                  <td className="text-ink-450 px-4 py-3 text-[13px]">
-                    {partner.distributor ? partner.distributor.name : "Direct"}
                   </td>
                   <td className="px-4 py-3">
                     <span
                       className={cn(
                         "w-fit rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                        partner.suspendedAt ? "bg-error-bg text-error-text" : "bg-success-bg text-success",
+                        distributor.suspendedAt
+                          ? "bg-error-bg text-error-text"
+                          : "bg-success-bg text-success",
                       )}
                     >
-                      {partner.suspendedAt ? "Suspended" : "Active"}
+                      {distributor.suspendedAt ? "Suspended" : "Active"}
                     </span>
                   </td>
-                  <td className="px-4 py-3">{partner.organizationCount}</td>
-                  <td className="px-4 py-3 font-medium">₹{(partner.walletBalanceCents / 100).toFixed(2)}</td>
-                  <td className="px-4 py-3 text-[13px]">{formatDate(partner.createdAt)}</td>
+                  <td className="text-ink-450 px-4 py-3 text-[13px]">
+                    {distributor.creditEnabled ? "Enabled" : "Disabled"}
+                  </td>
+                  <td className="px-4 py-3">{distributor.partnerCount}</td>
+                  <td className="px-4 py-3 font-medium">
+                    ₹{(distributor.walletBalanceCents / 100).toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3 text-[13px]">{formatDate(distributor.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => toggleSuspend(partner)}
-                        disabled={pendingId === partner.id}
+                        onClick={() => toggleSuspend(distributor)}
+                        disabled={pendingId === distributor.id}
                         className={cn(
                           "flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold disabled:opacity-60",
-                          partner.suspendedAt
+                          distributor.suspendedAt
                             ? "border-input hover:bg-surface-muted"
                             : "border-error-border text-error-text hover:bg-error-bg",
                         )}
                       >
-                        {pendingId === partner.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {partner.suspendedAt ? "Reactivate" : "Suspend"}
+                        {pendingId === distributor.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {distributor.suspendedAt ? "Reactivate" : "Suspend"}
                       </button>
                     </div>
                   </td>
@@ -179,7 +178,7 @@ export function PartnersView() {
       )}
 
       {creating && (
-        <NewPartnerModal
+        <NewDistributorModal
           onClose={() => setCreating(false)}
           onCreated={() => {
             setCreating(false);

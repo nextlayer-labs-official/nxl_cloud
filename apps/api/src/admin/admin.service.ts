@@ -7,11 +7,14 @@ import { uniqueOrgSlug } from "../organizations/slug.util";
 import { getPlatformSettings, setPaymentsEnabled } from "../platform-settings/platform-settings.util";
 import type { ChangePlanDto } from "./dto/change-plan.dto";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
+import type { CreateDistributorDto } from "./dto/create-distributor.dto";
 import type { CreatePartnerDto } from "./dto/create-partner.dto";
 import type { CreatePlanDto } from "./dto/create-plan.dto";
 import type { CreditPartnerWalletDto } from "./dto/credit-partner-wallet.dto";
+import type { SetPartnerDistributorDto } from "./dto/set-partner-distributor.dto";
 import type { SetPartnerPlanPriceDto } from "./dto/set-partner-plan-price.dto";
 import type { UpdatePlanDto } from "./dto/update-plan.dto";
+import type { ToggleCreditEnabledDto } from "./dto/toggle-credit-enabled.dto";
 import type { UpdatePlatformSettingsDto } from "./dto/update-platform-settings.dto";
 import type { UpdateSubscriptionDto } from "./dto/update-subscription.dto";
 
@@ -623,7 +626,10 @@ export class AdminService {
   async listPartners() {
     const partners = await prisma.partner.findMany({
       orderBy: { createdAt: "asc" },
-      include: { _count: { select: { organizations: true } } },
+      include: {
+        _count: { select: { organizations: true } },
+        distributor: { select: { id: true, name: true } },
+      },
     });
     return partners.map((p) => ({
       id: p.id,
@@ -634,6 +640,8 @@ export class AdminService {
       createdAt: p.createdAt,
       organizationCount: p._count.organizations,
       walletBalanceCents: p.walletBalanceCents,
+      // null = a direct partner (admin-managed); set = onboarded by this distributor.
+      distributor: p.distributor,
     }));
   }
 
@@ -652,7 +660,11 @@ export class AdminService {
   }
 
   async getPartner(id: string) {
-    const partner = await this.requirePartner(id);
+    const partner = await prisma.partner.findUnique({
+      where: { id },
+      include: { distributor: { select: { id: true, name: true } } },
+    });
+    if (!partner) throw new NotFoundException("Partner not found.");
     const organizations = await prisma.organization.findMany({
       where: { partnerId: id },
       include: { subscription: { include: { plan: true } } },
@@ -675,6 +687,7 @@ export class AdminService {
       suspendedAt: partner.suspendedAt,
       createdAt: partner.createdAt,
       walletBalanceCents: partner.walletBalanceCents,
+      distributor: partner.distributor,
       organizations: organizations.map((org) => ({
         id: org.id,
         customerNumber: org.customerNumber,
@@ -704,6 +717,27 @@ export class AdminService {
    * unlimited plan contribute no finite quota, so they're counted
    * separately (`unlimitedCount`) rather than silently skewing the total.
    */
+  /**
+   * Move a partner under a distributor (or back to direct with distributorId
+   * null). Wallet balances don't move — this only changes who manages the
+   * partner and, via PartnerService.resolvePartnerPrice, which rate an unset
+   * per-plan price falls back to.
+   */
+  async setPartnerDistributor(partnerId: string, dto: SetPartnerDistributorDto) {
+    await this.requirePartner(partnerId);
+    const distributorId = dto.distributorId ?? null;
+    if (distributorId) {
+      const distributor = await prisma.distributor.findUnique({ where: { id: distributorId } });
+      if (!distributor) throw new NotFoundException("Distributor not found.");
+    }
+    const updated = await prisma.partner.update({
+      where: { id: partnerId },
+      data: { distributorId },
+      include: { distributor: { select: { id: true, name: true } } },
+    });
+    return { id: updated.id, distributor: updated.distributor };
+  }
+
   async getPartnerUsageSummary(partnerId: string) {
     await this.requirePartner(partnerId);
     const orgs = await prisma.organization.findMany({
@@ -769,6 +803,7 @@ export class AdminService {
       take: 100,
       include: {
         createdBy: { select: { name: true, email: true } },
+        createdByDistributor: { select: { name: true } },
         organization: { select: { name: true, slug: true, customerNumber: true } },
         plan: { select: { name: true } },
       },
@@ -826,6 +861,173 @@ export class AdminService {
       partnerPriceMonthlyCents: saved.priceMonthlyCents,
       partnerPriceYearlyCents: saved.priceYearlyCents,
     };
+  }
+
+  // --- Distributors ---
+
+  private async requireDistributor(id: string) {
+    const distributor = await prisma.distributor.findUnique({ where: { id } });
+    if (!distributor) throw new NotFoundException("Distributor not found.");
+    return distributor;
+  }
+
+  async createDistributor(dto: CreateDistributorDto) {
+    const email = dto.email.toLowerCase().trim();
+    const existing = await prisma.distributor.findUnique({ where: { email } });
+    if (existing) throw new ConflictException("A distributor with this email already exists.");
+
+    const passwordHash = await hashPassword(dto.password);
+    const distributor = await prisma.distributor.create({ data: { name: dto.name, email, passwordHash } });
+    return { id: distributor.id, name: distributor.name, email: distributor.email };
+  }
+
+  async listDistributors() {
+    const distributors = await prisma.distributor.findMany({
+      orderBy: { createdAt: "asc" },
+      include: { _count: { select: { partners: true } } },
+    });
+    return distributors.map((d) => ({
+      id: d.id,
+      name: d.name,
+      email: d.email,
+      suspendedAt: d.suspendedAt,
+      creditEnabled: d.creditEnabled,
+      createdAt: d.createdAt,
+      partnerCount: d._count.partners,
+      walletBalanceCents: d.walletBalanceCents,
+    }));
+  }
+
+  async getDistributor(id: string) {
+    const distributor = await this.requireDistributor(id);
+    const partners = await prisma.partner.findMany({
+      where: { distributorId: id },
+      orderBy: { createdAt: "desc" },
+      include: { _count: { select: { organizations: true } } },
+    });
+    return {
+      id: distributor.id,
+      name: distributor.name,
+      email: distributor.email,
+      suspendedAt: distributor.suspendedAt,
+      creditEnabled: distributor.creditEnabled,
+      createdAt: distributor.createdAt,
+      walletBalanceCents: distributor.walletBalanceCents,
+      partners: partners.map((p) => ({
+        id: p.id,
+        name: p.name,
+        email: p.email,
+        code: p.code,
+        suspendedAt: p.suspendedAt,
+        createdAt: p.createdAt,
+        organizationCount: p._count.organizations,
+        walletBalanceCents: p.walletBalanceCents,
+      })),
+    };
+  }
+
+  async suspendDistributor(id: string) {
+    await this.requireDistributor(id);
+    return prisma.distributor.update({ where: { id }, data: { suspendedAt: new Date() } });
+  }
+
+  async reactivateDistributor(id: string) {
+    await this.requireDistributor(id);
+    return prisma.distributor.update({ where: { id }, data: { suspendedAt: null } });
+  }
+
+  async setDistributorCreditEnabled(id: string, dto: ToggleCreditEnabledDto) {
+    await this.requireDistributor(id);
+    const updated = await prisma.distributor.update({ where: { id }, data: { creditEnabled: dto.creditEnabled } });
+    return { creditEnabled: updated.creditEnabled };
+  }
+
+  /** Every plan alongside this distributor's admin-set rate (null = uses the plan's list price). */
+  async getDistributorPricing(distributorId: string) {
+    await this.requireDistributor(distributorId);
+    const [plans, prices] = await Promise.all([
+      prisma.plan.findMany({ orderBy: { createdAt: "asc" } }),
+      prisma.distributorPlanPrice.findMany({ where: { distributorId } }),
+    ]);
+    const priceByPlanId = new Map(prices.map((p) => [p.planId, p]));
+    return plans.map((plan) => {
+      const override = priceByPlanId.get(plan.id);
+      return {
+        planId: plan.id,
+        planName: plan.name,
+        listPriceMonthlyCents: plan.priceMonthlyCents,
+        listPriceYearlyCents: plan.priceYearlyCents,
+        distributorPriceMonthlyCents: override?.priceMonthlyCents ?? null,
+        distributorPriceYearlyCents: override?.priceYearlyCents ?? null,
+      };
+    });
+  }
+
+  /** Both fields null/omitted clears the override — the distributor rate falls back to the plan list price. */
+  async setDistributorPlanPrice(distributorId: string, planId: string, dto: SetPartnerPlanPriceDto) {
+    await this.requireDistributor(distributorId);
+    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (!plan) throw new NotFoundException("Plan not found.");
+
+    if (dto.priceMonthlyCents == null && dto.priceYearlyCents == null) {
+      await prisma.distributorPlanPrice.deleteMany({ where: { distributorId, planId } });
+      return { planId, distributorPriceMonthlyCents: null, distributorPriceYearlyCents: null };
+    }
+
+    const saved = await prisma.distributorPlanPrice.upsert({
+      where: { distributorId_planId: { distributorId, planId } },
+      create: {
+        distributorId,
+        planId,
+        priceMonthlyCents: dto.priceMonthlyCents ?? null,
+        priceYearlyCents: dto.priceYearlyCents ?? null,
+      },
+      update: {
+        priceMonthlyCents: dto.priceMonthlyCents ?? null,
+        priceYearlyCents: dto.priceYearlyCents ?? null,
+      },
+    });
+    return {
+      planId,
+      distributorPriceMonthlyCents: saved.priceMonthlyCents,
+      distributorPriceYearlyCents: saved.priceYearlyCents,
+    };
+  }
+
+  async getDistributorWallet(distributorId: string) {
+    const distributor = await this.requireDistributor(distributorId);
+    const transactions = await prisma.distributorWalletTransaction.findMany({
+      where: { distributorId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: {
+        createdByAdmin: { select: { name: true, email: true } },
+        partner: { select: { name: true } },
+      },
+    });
+    return { balanceCents: distributor.walletBalanceCents, transactions };
+  }
+
+  /** Manual top-up of a distributor's wallet — the funding source for everything the distributor pushes down to its partners. */
+  async creditDistributorWallet(adminId: string, distributorId: string, dto: CreditPartnerWalletDto) {
+    await this.requireDistributor(distributorId);
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.distributor.update({
+        where: { id: distributorId },
+        data: { walletBalanceCents: { increment: dto.amountCents } },
+      });
+      await tx.distributorWalletTransaction.create({
+        data: {
+          distributorId,
+          type: "CREDIT",
+          amountCents: dto.amountCents,
+          balanceAfterCents: updated.walletBalanceCents,
+          note: dto.note?.trim() || null,
+          createdByAdminId: adminId,
+        },
+      });
+      return { walletBalanceCents: updated.walletBalanceCents };
+    });
   }
 
   /** Platform-wide toggles — today just the Razorpay kill-switch (see BillingService). */

@@ -6,40 +6,37 @@ import { usePathname, useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import type { AdminUser } from "@/types/admin";
-import { AdminContext } from "./admin-context";
+import type { DistributorUser } from "@/types/distributor";
+import { DistributorContext } from "./distributor-context";
 
-type LoadState = { status: "loading" } | { status: "ready"; adminUser: AdminUser } | { status: "error" };
+type LoadState =
+  | { status: "loading" }
+  | { status: "ready"; distributor: DistributorUser }
+  | { status: "error" };
 
 const NAV_LINKS = [
-  { href: "/admin", label: "Overview" },
-  { href: "/admin/organizations", label: "Organizations" },
-  { href: "/admin/distributors", label: "Distributors" },
-  { href: "/admin/partners", label: "Partners" },
-  { href: "/admin/plans", label: "Plans" },
-  { href: "/admin/audit-log", label: "Audit Log" },
-  { href: "/admin/settings", label: "Settings" },
+  { href: "/distributor", label: "Partners" },
+  { href: "/distributor/wallet", label: "Wallet" },
 ];
 
-/** "/admin" is a prefix of every other admin path, so it needs an exact match; every other link should stay highlighted on its own nested/detail routes (e.g. /admin/organizations/:id). */
 function isNavLinkActive(pathname: string, href: string): boolean {
-  return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+  return href === "/distributor" ? pathname === "/distributor" || pathname.startsWith("/distributor/partners") : pathname.startsWith(href);
 }
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function DistributorShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   const fetchMe = useCallback(async () => {
-    const { adminUser } = await api.get<{ adminUser: AdminUser }>("/admin/auth/me");
-    setState({ status: "ready", adminUser });
+    const { distributor } = await api.get<{ distributor: DistributorUser }>("/distributor/auth/me");
+    setState({ status: "ready", distributor });
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     fetchMe().catch(() => {
-      if (!cancelled) router.replace("/admin/login");
+      if (!cancelled) router.replace("/distributor/login");
     });
     return () => {
       cancelled = true;
@@ -47,8 +44,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }, [fetchMe, router]);
 
   async function handleLogout() {
-    await api.post("/admin/auth/logout").catch(() => {});
-    router.replace("/admin/login");
+    await api.post("/distributor/auth/logout").catch(() => {});
+    router.replace("/distributor/login");
   }
 
   if (state.status !== "ready") {
@@ -56,11 +53,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AdminContext.Provider value={{ adminUser: state.adminUser }}>
+    <DistributorContext.Provider value={{ distributor: state.distributor }}>
       <div className="bg-background text-foreground min-h-screen w-full">
         <header className="border-border-subtle bg-background flex h-16 shrink-0 items-center gap-6 border-b px-6">
-          <Link href="/admin" className="text-foreground shrink-0 text-[17px] font-bold tracking-[-0.02em]">
-            Skylyer <span className="text-ink-450 font-medium">Admin</span>
+          <Link
+            href="/distributor"
+            className="text-foreground shrink-0 text-[17px] font-bold tracking-[-0.02em]"
+          >
+            Skylyer <span className="text-ink-450 font-medium">Distributor</span>
           </Link>
           <nav className="flex items-center gap-1">
             {NAV_LINKS.map((link) => (
@@ -70,8 +70,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 className={cn(
                   "rounded-lg px-3 py-2 text-[13px] font-semibold",
                   isNavLinkActive(pathname, link.href)
-                    ? "bg-accent text-accent-foreground"
-                    : "text-ink-600 hover:bg-surface-muted",
+                    ? "bg-surface-muted text-foreground"
+                    : "text-ink-550 hover:text-foreground",
                 )}
               >
                 {link.label}
@@ -79,7 +79,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-4">
-            <div className="text-ink-450 text-[13px]">{state.adminUser.email}</div>
+            <div className="text-ink-450 text-[13px]">{state.distributor.name}</div>
             <button
               type="button"
               onClick={handleLogout}
@@ -92,6 +92,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </header>
         <main className="mx-auto max-w-[1200px] px-6 py-10">{children}</main>
       </div>
-    </AdminContext.Provider>
+    </DistributorContext.Provider>
   );
 }

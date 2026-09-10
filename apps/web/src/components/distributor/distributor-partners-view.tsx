@@ -6,35 +6,41 @@ import { Loader2, Plus, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { AdminPartner } from "@/types/admin";
+import type { DistributorPartner, DistributorWallet } from "@/types/distributor";
 import { NewPartnerModal } from "./new-partner-modal";
 
 function initials(name: string): string {
   return name.slice(0, 1).toUpperCase();
 }
 
-export function PartnersView() {
-  const [partners, setPartners] = useState<AdminPartner[] | null>(null);
+export function DistributorPartnersView() {
+  const [partners, setPartners] = useState<DistributorPartner[] | null>(null);
+  const [wallet, setWallet] = useState<DistributorWallet | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
 
   function load() {
-    api
-      .get<AdminPartner[]>("/admin/partners")
-      .then(setPartners)
-      .catch(() => setError("Couldn't load partners."));
+    Promise.all([
+      api.get<DistributorPartner[]>("/distributor/partners"),
+      api.get<DistributorWallet>("/distributor/wallet"),
+    ])
+      .then(([partnersData, walletData]) => {
+        setPartners(partnersData);
+        setWallet(walletData);
+      })
+      .catch(() => setError("Couldn't load your partners."));
   }
 
   useEffect(load, []);
 
-  async function toggleSuspend(partner: AdminPartner) {
+  async function toggleSuspend(partner: DistributorPartner) {
     setPendingId(partner.id);
     try {
       const path = partner.suspendedAt
-        ? `/admin/partners/${partner.id}/reactivate`
-        : `/admin/partners/${partner.id}/suspend`;
+        ? `/distributor/partners/${partner.id}/reactivate`
+        : `/distributor/partners/${partner.id}/suspend`;
       await api.post(path);
       load();
     } finally {
@@ -60,20 +66,28 @@ export function PartnersView() {
         <div>
           <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">Partners</h1>
           <p className="text-ink-450 text-sm">
-            Resellers who manage billing for their mapped customers — {partners?.length ?? "…"} total.
+            Resellers you&apos;ve onboarded — {partners?.length ?? "…"} total.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold"
-        >
-          <Plus className="h-4 w-4" />
-          Onboard partner
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/distributor/wallet"
+            className="border-input hover:bg-surface-muted rounded-lg border px-3.5 py-2.5 text-sm font-semibold"
+          >
+            Wallet · ₹{((wallet?.balanceCents ?? 0) / 100).toFixed(2)}
+          </Link>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            Onboard partner
+          </button>
+        </div>
       </div>
 
-      <div className="mb-5 border-input bg-background flex w-full max-w-xs items-center gap-2 rounded-lg border px-3 py-2">
+      <div className="border-input bg-background mb-5 flex w-full max-w-xs items-center gap-2 rounded-lg border px-3 py-2">
         <Search className="text-ink-400 h-4 w-4 shrink-0" />
         <input
           value={query}
@@ -105,7 +119,6 @@ export function PartnersView() {
               <tr className="border-border-subtle bg-surface-muted border-b text-[12px]">
                 <th className="text-ink-550 px-4 py-3 font-semibold">Partner</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Code</th>
-                <th className="text-ink-550 px-4 py-3 font-semibold">Via</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Status</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Customers</th>
                 <th className="text-ink-550 px-4 py-3 font-semibold">Wallet</th>
@@ -120,7 +133,10 @@ export function PartnersView() {
                   className="border-border-subtle hover:bg-surface-muted/50 border-b last:border-0"
                 >
                   <td className="px-4 py-3">
-                    <Link href={`/admin/partners/${partner.id}`} className="flex items-center gap-2.5">
+                    <Link
+                      href={`/distributor/partners/${partner.id}`}
+                      className="flex items-center gap-2.5"
+                    >
                       <div className="bg-primary text-primary-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold">
                         {initials(partner.name)}
                       </div>
@@ -136,9 +152,6 @@ export function PartnersView() {
                     <code className="bg-surface-muted rounded px-1.5 py-0.5 text-[12px] font-semibold">
                       {partner.code}
                     </code>
-                  </td>
-                  <td className="text-ink-450 px-4 py-3 text-[13px]">
-                    {partner.distributor ? partner.distributor.name : "Direct"}
                   </td>
                   <td className="px-4 py-3">
                     <span

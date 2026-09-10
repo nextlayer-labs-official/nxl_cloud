@@ -394,9 +394,10 @@ model AdminUser {
   passwordHash String
   createdAt    DateTime @default(now())
 
-  sessions              AdminSession[]
-  partnerWalletCredits  PartnerWalletTransaction[]
-  platformSettingsEdits PlatformSettings[]
+  sessions                 AdminSession[]
+  partnerWalletCredits     PartnerWalletTransaction[]
+  distributorWalletCredits DistributorWalletTransaction[]
+  platformSettingsEdits    PlatformSettings[]
 }
 
 model AdminSession {
@@ -425,6 +426,11 @@ model Partner {
   code               String    @unique
   email              String    @unique
   passwordHash       String
+  /// Null = a "direct" partner, onboarded and funded by a platform admin
+  /// (every partner today). Set = onboarded by a Distributor, who funds this
+  /// partner's wallet from their own balance and sets this partner's per-plan
+  /// pricing. See DistributorService.
+  distributorId      String?
   suspendedAt        DateTime?
   /// Prepaid balance, manually topped up by admin (PartnerWalletTransaction
   /// CREDIT rows) against payment collected outside the platform (bank
@@ -437,15 +443,20 @@ model Partner {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  sessions           PartnerSession[]
-  organizations      Organization[]
+  sessions                PartnerSession[]
+  organizations           Organization[]
+  distributor             Distributor?                   @relation(fields: [distributorId], references: [id], onDelete: SetNull)
   /// Requests to leave/switch away FROM this partner — this partner is the one who must approve.
-  releaseRequests    PartnerChangeRequest[]     @relation("PartnerChangeRequestCurrent")
+  releaseRequests         PartnerChangeRequest[]         @relation("PartnerChangeRequestCurrent")
   /// Requests to switch TO this partner (initiated by a customer already mapped elsewhere).
-  incomingRequests   PartnerChangeRequest[]     @relation("PartnerChangeRequestNew")
+  incomingRequests        PartnerChangeRequest[]         @relation("PartnerChangeRequestNew")
   /// Admin-negotiated per-plan pricing for this partner — see PartnerPlanPrice.
-  planPrices         PartnerPlanPrice[]
-  walletTransactions PartnerWalletTransaction[]
+  planPrices              PartnerPlanPrice[]
+  walletTransactions      PartnerWalletTransaction[]
+  /// Rows where this partner received a wallet top-up from its distributor.
+  distributorWalletDebits DistributorWalletTransaction[]
+
+  @@index([distributorId])
 }
 
 enum PartnerWalletTransactionType {
@@ -460,21 +471,26 @@ enum PartnerWalletTransactionType {
 /// `balanceAfterCents` snapshots the running balance right after this row, so
 /// history renders without re-summing every prior row.
 model PartnerWalletTransaction {
-  id                String                       @id @default(cuid())
-  partnerId         String
-  type              PartnerWalletTransactionType
-  amountCents       Int
-  balanceAfterCents Int
-  note              String?
-  createdById       String?
-  organizationId    String?
-  planId            String?
-  createdAt         DateTime                     @default(now())
+  id                     String                       @id @default(cuid())
+  partnerId              String
+  type                   PartnerWalletTransactionType
+  amountCents            Int
+  balanceAfterCents      Int
+  note                   String?
+  /// The admin who made a manual top-up (CREDIT). Mutually exclusive with
+  /// `createdByDistributorId` — a CREDIT row has exactly one funding source.
+  createdById            String?
+  /// The distributor who funded this partner from their own wallet (CREDIT).
+  createdByDistributorId String?
+  organizationId         String?
+  planId                 String?
+  createdAt              DateTime                     @default(now())
 
-  partner      Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  createdBy    AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  plan         Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
+  partner              Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  createdBy            AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdByDistributor Distributor?  @relation(fields: [createdByDistributorId], references: [id], onDelete: SetNull)
+  organization         Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  plan                 Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
 
   @@index([partnerId, createdAt])
 }
@@ -537,6 +553,89 @@ model PartnerSession {
   @@index([partnerId])
 }
 
+/// A distributor sits one tier above Partner — onboarded and funded by a
+/// platform admin, it onboards and manages its own set of partners (the
+/// `distributorId`-linked ones), scoped exactly like the admin panel manages
+/// partners. Own login/portal/session, same deliberate decoupling as
+/// AdminUser and Partner.
+model Distributor {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  passwordHash       String
+  suspendedAt        DateTime?
+  /// Prepaid balance, topped up by admin (DistributorWalletTransaction CREDIT
+  /// rows). Debited when this distributor funds one of its partners' wallets.
+  /// Never goes negative — guarded against the balance at write time.
+  walletBalanceCents Int       @default(0)
+  /// Admin gate: while false, this distributor cannot push wallet funds to
+  /// its partners even with a positive balance.
+  creditEnabled      Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  sessions             DistributorSession[]
+  partners             Partner[]
+  planPrices           DistributorPlanPrice[]
+  walletTransactions   DistributorWalletTransaction[]
+  partnerWalletCredits PartnerWalletTransaction[]
+}
+
+model DistributorSession {
+  id            String   @id @default(cuid())
+  distributorId String
+  sessionToken  String   @unique
+  userAgent     String?
+  ipAddress     String?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  distributor Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+
+  @@index([distributorId])
+}
+
+/// One row per distributor wallet movement — an admin top-up (CREDIT,
+/// `createdByAdmin` + `note`) or an automatic debit when the distributor
+/// funds a partner's wallet (DEBIT, `partner` says which partner received it).
+/// `balanceAfterCents` snapshots the running balance right after this row.
+model DistributorWalletTransaction {
+  id                String                       @id @default(cuid())
+  distributorId     String
+  type              PartnerWalletTransactionType
+  amountCents       Int
+  balanceAfterCents Int
+  note              String?
+  createdByAdminId  String?
+  partnerId         String?
+  createdAt         DateTime                     @default(now())
+
+  distributor    Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  createdByAdmin AdminUser?  @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  partner        Partner?    @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([distributorId, createdAt])
+}
+
+/// Admin-set, per-(distributor, plan) rate — the "list price" that a
+/// distributor's partners' own per-plan prices fall back to when unset (the
+/// middle level of the 3-level chain in PartnerService.resolvePartnerPrice:
+/// partner override -> distributor rate -> plan list price).
+model DistributorPlanPrice {
+  id                String   @id @default(cuid())
+  distributorId     String
+  planId            String
+  priceMonthlyCents Int?
+  priceYearlyCents  Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  distributor Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  plan        Plan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([distributorId, planId])
+}
+
 /// Mirrors the 3 Pricing page tiers (Starter/Business/Enterprise).
 model Plan {
   id                String   @id @default(cuid())
@@ -567,6 +666,7 @@ model Plan {
   payments            Payment[]
   partnerPrices       PartnerPlanPrice[]
   partnerWalletDebits PartnerWalletTransaction[]
+  distributorPrices   DistributorPlanPrice[]
 }
 
 model Subscription {

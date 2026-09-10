@@ -7,13 +7,13 @@ import { api } from "@/lib/api-client";
 import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
-  AdminDistributor,
-  AdminPartnerDetail,
-  AdminPartnerPricingRow,
-  AdminPartnerUsageSummary,
-  AdminPartnerWallet,
-} from "@/types/admin";
-import { CreditPartnerWalletModal } from "./credit-partner-wallet-modal";
+  DistributorPartnerDetail,
+  DistributorPartnerPricingRow,
+  DistributorPartnerUsageSummary,
+  DistributorPartnerWallet,
+  DistributorWallet,
+} from "@/types/distributor";
+import { FundPartnerWalletModal } from "./fund-partner-wallet-modal";
 
 function centsToInput(cents: number | null): string {
   return cents === null ? "" : (cents / 100).toString();
@@ -26,17 +26,31 @@ function inputToCents(value: string): number | null {
   return Number.isNaN(parsed) ? null : Math.round(parsed * 100);
 }
 
-function PricingRow({ row, partnerId, onSaved }: { row: AdminPartnerPricingRow; partnerId: string; onSaved: () => void }) {
+function money(cents: number | null): string {
+  return cents === null ? "Custom" : `₹${(cents / 100).toFixed(2)}`;
+}
+
+function PricingRow({
+  row,
+  partnerId,
+  onSaved,
+}: {
+  row: DistributorPartnerPricingRow;
+  partnerId: string;
+  onSaved: () => void;
+}) {
   const [monthly, setMonthly] = useState(centsToInput(row.partnerPriceMonthlyCents));
   const [yearly, setYearly] = useState(centsToInput(row.partnerPriceYearlyCents));
   const [saving, setSaving] = useState(false);
 
-  const dirty = monthly !== centsToInput(row.partnerPriceMonthlyCents) || yearly !== centsToInput(row.partnerPriceYearlyCents);
+  const dirty =
+    monthly !== centsToInput(row.partnerPriceMonthlyCents) ||
+    yearly !== centsToInput(row.partnerPriceYearlyCents);
 
   async function save() {
     setSaving(true);
     try {
-      await api.patch(`/admin/partners/${partnerId}/pricing/${row.planId}`, {
+      await api.patch(`/distributor/partners/${partnerId}/pricing/${row.planId}`, {
         priceMonthlyCents: inputToCents(monthly),
         priceYearlyCents: inputToCents(yearly),
       });
@@ -51,10 +65,7 @@ function PricingRow({ row, partnerId, onSaved }: { row: AdminPartnerPricingRow; 
       <div className="min-w-0">
         <div className="text-foreground font-semibold">{row.planName}</div>
         <div className="text-ink-450 text-[12px]">
-          List price:{" "}
-          {row.listPriceMonthlyCents === null
-            ? "Custom"
-            : `₹${(row.listPriceMonthlyCents / 100).toFixed(2)}/mo · ₹${((row.listPriceYearlyCents ?? 0) / 100).toFixed(2)}/yr`}
+          Your rate: {money(row.distributorPriceMonthlyCents)}/mo · {money(row.distributorPriceYearlyCents)}/yr
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -92,15 +103,17 @@ function PricingRow({ row, partnerId, onSaved }: { row: AdminPartnerPricingRow; 
   );
 }
 
-function StorageSummaryCard({ summary }: { summary: AdminPartnerUsageSummary | null }) {
+function StorageSummaryCard({ summary }: { summary: DistributorPartnerUsageSummary | null }) {
   if (!summary) return null;
   const percentUsed =
-    summary.totalQuotaBytes > 0 ? Math.min(100, (summary.totalUsedBytes / summary.totalQuotaBytes) * 100) : 0;
+    summary.totalQuotaBytes > 0
+      ? Math.min(100, (summary.totalUsedBytes / summary.totalQuotaBytes) * 100)
+      : 0;
 
   return (
     <div className="border-border-subtle bg-surface-muted-2 mb-4 rounded-xl border p-5">
       <div className="text-ink-450 mb-3 text-[12px] font-semibold tracking-wide uppercase">
-        Storage across mapped customers
+        Storage across this partner&apos;s customers
       </div>
       <div className="grid grid-cols-3 gap-4">
         <div>
@@ -140,54 +153,44 @@ function StorageSummaryCard({ summary }: { summary: AdminPartnerUsageSummary | n
 
 type DetailTab = "customers" | "pricing" | "wallet";
 
-export function PartnerDetailView({ partnerId }: { partnerId: string }) {
-  const [partner, setPartner] = useState<AdminPartnerDetail | null>(null);
-  const [pricing, setPricing] = useState<AdminPartnerPricingRow[] | null>(null);
-  const [wallet, setWallet] = useState<AdminPartnerWallet | null>(null);
-  const [usageSummary, setUsageSummary] = useState<AdminPartnerUsageSummary | null>(null);
-  const [distributors, setDistributors] = useState<AdminDistributor[]>([]);
+export function DistributorPartnerDetailView({ partnerId }: { partnerId: string }) {
+  const [partner, setPartner] = useState<DistributorPartnerDetail | null>(null);
+  const [pricing, setPricing] = useState<DistributorPartnerPricingRow[] | null>(null);
+  const [wallet, setWallet] = useState<DistributorPartnerWallet | null>(null);
+  const [usageSummary, setUsageSummary] = useState<DistributorPartnerUsageSummary | null>(null);
+  const [ownWallet, setOwnWallet] = useState<DistributorWallet | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [tab, setTab] = useState<DetailTab>("customers");
-  const [crediting, setCrediting] = useState(false);
+  const [funding, setFunding] = useState(false);
 
   function load() {
     Promise.all([
-      api.get<AdminPartnerDetail>(`/admin/partners/${partnerId}`),
-      api.get<AdminPartnerPricingRow[]>(`/admin/partners/${partnerId}/pricing`),
-      api.get<AdminPartnerWallet>(`/admin/partners/${partnerId}/wallet`),
-      api.get<AdminPartnerUsageSummary>(`/admin/partners/${partnerId}/usage-summary`),
-      api.get<AdminDistributor[]>("/admin/distributors"),
+      api.get<DistributorPartnerDetail>(`/distributor/partners/${partnerId}`),
+      api.get<DistributorPartnerPricingRow[]>(`/distributor/partners/${partnerId}/pricing`),
+      api.get<DistributorPartnerWallet>(`/distributor/partners/${partnerId}/wallet`),
+      api.get<DistributorPartnerUsageSummary>(`/distributor/partners/${partnerId}/usage-summary`),
+      api.get<DistributorWallet>("/distributor/wallet"),
     ])
-      .then(([partnerData, pricingData, walletData, usageData, distributorsData]) => {
+      .then(([partnerData, pricingData, walletData, usageData, ownWalletData]) => {
         setPartner(partnerData);
         setPricing(pricingData);
         setWallet(walletData);
         setUsageSummary(usageData);
-        setDistributors(distributorsData);
+        setOwnWallet(ownWalletData);
       })
       .catch(() => setError("Couldn't load this partner."));
   }
 
   useEffect(load, [partnerId]);
 
-  async function changeDistributor(distributorId: string | null) {
-    setPending(true);
-    try {
-      await api.patch(`/admin/partners/${partnerId}/distributor`, { distributorId });
-      load();
-    } finally {
-      setPending(false);
-    }
-  }
-
   async function toggleSuspend() {
     if (!partner) return;
     setPending(true);
     try {
       const path = partner.suspendedAt
-        ? `/admin/partners/${partner.id}/reactivate`
-        : `/admin/partners/${partner.id}/suspend`;
+        ? `/distributor/partners/${partner.id}/reactivate`
+        : `/distributor/partners/${partner.id}/suspend`;
       await api.post(path);
       load();
     } finally {
@@ -201,7 +204,7 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
   return (
     <div>
       <Link
-        href="/admin/partners"
+        href="/distributor"
         className="text-ink-450 hover:text-foreground mb-4 flex items-center gap-1.5 text-[13px] font-medium"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
@@ -211,27 +214,11 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-foreground mb-1 text-2xl font-bold tracking-[-0.02em]">{partner.name}</h1>
-          <p className="text-ink-450 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <span>{partner.email}</span>
-            <span>·</span>
+          <p className="text-ink-450 text-sm">
+            {partner.email} ·{" "}
             <code className="bg-surface-muted rounded px-1.5 py-0.5 text-[12px] font-semibold">
               {partner.code}
             </code>
-            <span>·</span>
-            <span className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">Managed by</span>
-            <select
-              value={partner.distributor?.id ?? ""}
-              onChange={(e) => changeDistributor(e.target.value || null)}
-              disabled={pending}
-              className="border-input bg-background rounded-lg border px-2 py-1 text-[13px] disabled:opacity-60"
-            >
-              <option value="">Direct (admin)</option>
-              {distributors.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -268,45 +255,35 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
       )}
 
       <div className="bg-surface-muted mb-6 inline-flex items-center gap-1 rounded-full p-1">
-        <button
-          type="button"
-          onClick={() => setTab("customers")}
-          className={cn(
-            "cursor-pointer rounded-full px-4 py-2 text-sm font-semibold transition",
-            tab === "customers" ? "bg-background text-foreground shadow-sm" : "text-ink-550 hover:text-foreground",
-          )}
-        >
-          Customers ({partner.organizations.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("pricing")}
-          className={cn(
-            "cursor-pointer rounded-full px-4 py-2 text-sm font-semibold transition",
-            tab === "pricing" ? "bg-background text-foreground shadow-sm" : "text-ink-550 hover:text-foreground",
-          )}
-        >
-          Pricing
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("wallet")}
-          className={cn(
-            "cursor-pointer rounded-full px-4 py-2 text-sm font-semibold transition",
-            tab === "wallet" ? "bg-background text-foreground shadow-sm" : "text-ink-550 hover:text-foreground",
-          )}
-        >
-          Wallet · ₹{((wallet?.balanceCents ?? 0) / 100).toFixed(2)}
-        </button>
+        {(["customers", "pricing", "wallet"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={cn(
+              "cursor-pointer rounded-full px-4 py-2 text-sm font-semibold transition capitalize",
+              tab === t ? "bg-background text-foreground shadow-sm" : "text-ink-550 hover:text-foreground",
+            )}
+          >
+            {t === "customers"
+              ? `Customers (${partner.organizations.length})`
+              : t === "wallet"
+                ? `Wallet · ₹${((wallet?.balanceCents ?? 0) / 100).toFixed(2)}`
+                : "Pricing"}
+          </button>
+        ))}
       </div>
 
       {tab === "customers" && (
         <div>
           <StorageSummaryCard summary={usageSummary} />
           <div className="border-border-subtle rounded-xl border p-5">
-            <h2 className="text-foreground mb-4 text-[15px] font-semibold">
-              Mapped customers ({partner.organizations.length})
+            <h2 className="text-foreground mb-1 text-[15px] font-semibold">
+              This partner&apos;s customers ({partner.organizations.length})
             </h2>
+            <p className="text-ink-450 mb-4 text-[12px]">
+              Read-only — plan changes for these customers are made by the partner.
+            </p>
             {partner.organizations.length === 0 ? (
               <p className="text-ink-450 text-[13px]">
                 No customer has entered this partner&apos;s code yet.
@@ -314,20 +291,21 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
             ) : (
               <div className="flex flex-col gap-3">
                 {partner.organizations.map((org) => (
-                  <Link
+                  <div
                     key={org.id}
-                    href={`/admin/organizations/${org.id}`}
-                    className="border-border-subtle hover:bg-surface-muted/50 flex items-center justify-between gap-4 rounded-lg border px-4 py-3 text-[13px]"
+                    className="border-border-subtle flex items-center justify-between gap-4 rounded-lg border px-4 py-3 text-[13px]"
                   >
                     <div className="min-w-0">
                       <div className="text-foreground font-semibold">{org.name}</div>
-                      <div className="text-ink-450">{formatCustomerCode(org.customerNumber)} · {org.slug}</div>
+                      <div className="text-ink-450">
+                        {formatCustomerCode(org.customerNumber)} · {org.slug}
+                      </div>
                     </div>
                     <div className="text-ink-450 shrink-0">
                       {formatBytes(org.storageUsedBytes)} /{" "}
                       {org.storageLimitBytes === null ? "Unlimited" : formatBytes(org.storageLimitBytes)}
                     </div>
-                    <div className="text-right shrink-0">
+                    <div className="shrink-0 text-right">
                       {org.subscription ? (
                         <>
                           <div className="text-foreground font-medium">{org.subscription.plan.name}</div>
@@ -337,7 +315,7 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
                         <span className="text-ink-450">No subscription</span>
                       )}
                     </div>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}
@@ -349,8 +327,8 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
         <div className="border-border-subtle overflow-hidden rounded-xl border">
           <div className="border-border-subtle bg-surface-muted border-b px-4 py-3">
             <p className="text-ink-450 text-[12px]">
-              What this partner actually pays when activating or changing a customer&apos;s plan — debited
-              straight from their wallet. Leave a field blank to fall back to the plan&apos;s list price.
+              What this partner pays per plan — debited from their wallet on each plan change. Leave a field
+              blank to fall back to your own rate for that plan.
             </p>
           </div>
           {!pricing ? (
@@ -368,7 +346,7 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
           <div className="border-border-subtle bg-surface-muted-2 flex items-center justify-between rounded-xl border p-5">
             <div>
               <div className="text-ink-450 text-[12px] font-semibold tracking-wide uppercase">
-                Wallet balance
+                Partner wallet balance
               </div>
               <div className="text-foreground mt-1 text-[22px] font-bold">
                 ₹{((wallet?.balanceCents ?? 0) / 100).toFixed(2)}
@@ -376,11 +354,11 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
             </div>
             <button
               type="button"
-              onClick={() => setCrediting(true)}
+              onClick={() => setFunding(true)}
               className="bg-primary text-primary-foreground hover:bg-primary/90 flex cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold"
             >
               <Plus className="h-4 w-4" />
-              Credit wallet
+              Fund from your wallet
             </button>
           </div>
 
@@ -404,7 +382,7 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
                       <div className="text-ink-450">
                         {formatDate(tx.createdAt)}
                         {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
-                        {tx.createdByDistributor && ` · from ${tx.createdByDistributor.name}`}
+                        {tx.createdByDistributor && ` · by ${tx.createdByDistributor.name}`}
                         {tx.createdBy && ` · by ${tx.createdBy.name}`}
                       </div>
                     </div>
@@ -424,13 +402,15 @@ export function PartnerDetailView({ partnerId }: { partnerId: string }) {
         </div>
       )}
 
-      {crediting && (
-        <CreditPartnerWalletModal
+      {funding && (
+        <FundPartnerWalletModal
           partnerId={partnerId}
           partnerName={partner.name}
-          onClose={() => setCrediting(false)}
-          onCredited={() => {
-            setCrediting(false);
+          availableCents={ownWallet?.balanceCents ?? 0}
+          creditEnabled={ownWallet?.creditEnabled ?? false}
+          onClose={() => setFunding(false)}
+          onFunded={() => {
+            setFunding(false);
             load();
           }}
         />
