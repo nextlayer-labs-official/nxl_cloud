@@ -110,18 +110,20 @@ export class PartnerService {
    * partner's own negotiated prices instead of the customer's list price —
    * the wallet balance plays the role the customer's account credit does
    * there. No discount concept here: a partner's negotiated price already
-   * IS their rate.
+   * IS their rate. `oldCycle`/`newCycle` can differ (e.g. the same plan
+   * switching monthly -> annual mid-cycle) — each price is prorated against
+   * its own cycle's day-length, not a single shared one.
    */
   private computeProration(
     oldPriceCents: number,
     newPriceCents: number,
-    cycle: BillingCycle,
+    oldCycle: BillingCycle,
+    newCycle: BillingCycle,
     currentPeriodEnd: Date,
   ): number {
-    const totalCycleDays = CYCLE_DAYS[cycle];
     const daysRemaining = Math.max(0, Math.ceil((currentPeriodEnd.getTime() - Date.now()) / DAY_MS));
-    const unusedOldValueCents = Math.round((oldPriceCents * daysRemaining) / totalCycleDays);
-    const proratedNewCostCents = Math.round((newPriceCents * daysRemaining) / totalCycleDays);
+    const unusedOldValueCents = Math.round((oldPriceCents * daysRemaining) / CYCLE_DAYS[oldCycle]);
+    const proratedNewCostCents = Math.round((newPriceCents * daysRemaining) / CYCLE_DAYS[newCycle]);
     return Math.max(0, proratedNewCostCents - unusedOldValueCents);
   }
 
@@ -159,12 +161,18 @@ export class PartnerService {
     // freshly-mapped customer would get prorated against that free default
     // plan instead of charged in full.
     const isMovingOffDefaultPlan = existingSubscription?.plan.isDefault === true;
+    // A billing-cycle switch on the SAME plan (e.g. monthly -> annual) needs
+    // the same proration treatment as a plan change — isPlanChange alone
+    // would miss it and this would fall through to the full-price branch
+    // below with zero credit for unused time.
+    const cycleChanged = !!existingSubscription && existingSubscription.billingCycle !== dto.billingCycle;
 
-    if (isPlanChange && hasActivePeriod && !isMovingOffDefaultPlan) {
-      const cycle = existingSubscription!.billingCycle;
+    if ((isPlanChange || cycleChanged) && hasActivePeriod && !isMovingOffDefaultPlan) {
+      const oldCycle = existingSubscription!.billingCycle;
+      const newCycle = dto.billingCycle;
       const [oldPrice, newPrice] = await Promise.all([
-        this.resolvePartnerPrice(partnerId, existingSubscription!.plan, cycle),
-        this.resolvePartnerPrice(partnerId, plan, cycle),
+        this.resolvePartnerPrice(partnerId, existingSubscription!.plan, oldCycle),
+        this.resolvePartnerPrice(partnerId, plan, newCycle),
       ]);
       const isUpgrade = (newPrice ?? 0) > (oldPrice ?? 0);
 
@@ -178,7 +186,8 @@ export class PartnerService {
       const netCents = this.computeProration(
         oldPrice ?? 0,
         newPrice ?? 0,
-        cycle,
+        oldCycle,
+        newCycle,
         existingSubscription!.currentPeriodEnd!,
       );
 
@@ -192,9 +201,9 @@ export class PartnerService {
           where: { organizationId },
           data: {
             planId: plan.id,
-            billingCycle: cycle,
+            billingCycle: newCycle,
             status: "ACTIVE",
-            currentPeriodEnd: new Date(Date.now() + PERIOD_MS[cycle]),
+            currentPeriodEnd: new Date(Date.now() + PERIOD_MS[newCycle]),
           },
           include: { plan: true },
         });

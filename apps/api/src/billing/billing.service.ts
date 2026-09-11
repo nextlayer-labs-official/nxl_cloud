@@ -69,25 +69,30 @@ export class BillingService {
 
   /**
    * Pure arithmetic, no side effects — shared by `createUpgradeOrder` (which
-   * commits) and `getOrderPreview` (which doesn't).
+   * commits) and `getOrderPreview` (which doesn't). `newCycle` is the cycle
+   * being switched TO (from the request), which may differ from the
+   * subscription's current `billingCycle` (e.g. switching the same plan
+   * from monthly to annual mid-cycle) — the old value is prorated against
+   * the OLD cycle's day-length, the new cost against the NEW cycle's, so a
+   * cross-cycle switch is never silently treated as free/full-priceless.
    */
   private computeUpgradeProration(
     existingSubscription: Subscription & { plan: Plan },
     newPlan: Plan,
-    cycle: BillingCycle,
+    newCycle: BillingCycle,
   ): { unusedOldValueCents: number; proratedNewCostCents: number; netCents: number; daysRemaining: number } {
-    const totalCycleDays = CYCLE_DAYS[cycle];
+    const oldCycle = existingSubscription.billingCycle;
     const daysRemaining = Math.max(
       0,
       Math.ceil((existingSubscription.currentPeriodEnd!.getTime() - Date.now()) / DAY_MS),
     );
 
     const oldListPrice =
-      cycle === "ANNUAL" ? existingSubscription.plan.priceYearlyCents : existingSubscription.plan.priceMonthlyCents;
-    const newListPrice = cycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
+      oldCycle === "ANNUAL" ? existingSubscription.plan.priceYearlyCents : existingSubscription.plan.priceMonthlyCents;
+    const newListPrice = newCycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
 
-    const unusedOldValueCents = Math.round(((oldListPrice ?? 0) * daysRemaining) / totalCycleDays);
-    const proratedNewCostCents = Math.round(((newListPrice ?? 0) * daysRemaining) / totalCycleDays);
+    const unusedOldValueCents = Math.round(((oldListPrice ?? 0) * daysRemaining) / CYCLE_DAYS[oldCycle]);
+    const proratedNewCostCents = Math.round(((newListPrice ?? 0) * daysRemaining) / CYCLE_DAYS[newCycle]);
     let netCents = Math.max(0, proratedNewCostCents - unusedOldValueCents);
 
     if (netCents > 0 && existingSubscription.discountPercent) {
@@ -161,17 +166,23 @@ export class BillingService {
       !!existingSubscription.currentPeriodEnd &&
       existingSubscription.currentPeriodEnd > new Date();
 
-    if (isPlanChange && hasActivePeriod) {
-      const cycle = existingSubscription!.billingCycle;
+    // A billing-cycle switch on the SAME plan (e.g. monthly -> annual) needs
+    // the exact same proration treatment as a plan change — without this,
+    // isPlanChange alone would miss it and this would fall through to the
+    // full-price branch below with zero credit for unused time.
+    const cycleChanged = !!existingSubscription && existingSubscription.billingCycle !== dto.billingCycle;
+
+    if ((isPlanChange || cycleChanged) && hasActivePeriod) {
+      const oldCycle = existingSubscription!.billingCycle;
       const oldListPrice =
-        cycle === "ANNUAL"
+        oldCycle === "ANNUAL"
           ? existingSubscription!.plan.priceYearlyCents
           : existingSubscription!.plan.priceMonthlyCents;
-      const newListPrice = cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+      const newListPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
       const isUpgrade = (newListPrice ?? 0) > (oldListPrice ?? 0);
 
       if (isUpgrade) {
-        return this.createUpgradeOrder(membership.organizationId, existingSubscription!, plan);
+        return this.createUpgradeOrder(membership.organizationId, existingSubscription!, plan, dto.billingCycle);
       }
 
       const readableDate = existingSubscription!.currentPeriodEnd!.toISOString().slice(0, 10);
@@ -229,14 +240,14 @@ export class BillingService {
     organizationId: string,
     existingSubscription: Subscription & { plan: Plan },
     newPlan: Plan,
+    newCycle: BillingCycle,
   ) {
-    const cycle = existingSubscription.billingCycle;
-    const newListPrice = cycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
+    const newListPrice = newCycle === "ANNUAL" ? newPlan.priceYearlyCents : newPlan.priceMonthlyCents;
     if (newListPrice === null) {
       throw new BadRequestException("This plan isn't available for self-serve checkout.");
     }
 
-    const { netCents } = this.computeUpgradeProration(existingSubscription, newPlan, cycle);
+    const { netCents } = this.computeUpgradeProration(existingSubscription, newPlan, newCycle);
     const creditAvailable = existingSubscription.creditBalanceCents;
     const amountAfterCredit = netCents - creditAvailable;
 
@@ -247,7 +258,8 @@ export class BillingService {
         where: { organizationId },
         data: {
           planId: newPlan.id,
-          currentPeriodEnd: new Date(Date.now() + PERIOD_MS[cycle]),
+          billingCycle: newCycle,
+          currentPeriodEnd: new Date(Date.now() + PERIOD_MS[newCycle]),
           creditBalanceCents: newCreditBalance,
         },
         include: { plan: true },
@@ -268,7 +280,7 @@ export class BillingService {
       notes: {
         organizationId,
         planId: newPlan.id,
-        billingCycle: cycle,
+        billingCycle: newCycle,
         prorated: "true",
       },
     });
@@ -408,18 +420,22 @@ export class BillingService {
       !!existingSubscription.currentPeriodEnd &&
       existingSubscription.currentPeriodEnd > new Date();
 
-    if (isPlanChange && hasActivePeriod) {
-      const cycle = existingSubscription!.billingCycle;
+    // A billing-cycle switch on the SAME plan needs the same proration
+    // treatment as a plan change — see the identical guard in createOrder.
+    const cycleChanged = !!existingSubscription && existingSubscription.billingCycle !== dto.billingCycle;
+
+    if ((isPlanChange || cycleChanged) && hasActivePeriod) {
+      const oldCycle = existingSubscription!.billingCycle;
       const oldListPrice =
-        cycle === "ANNUAL"
+        oldCycle === "ANNUAL"
           ? existingSubscription!.plan.priceYearlyCents
           : existingSubscription!.plan.priceMonthlyCents;
-      const newListPrice = cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+      const newListPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
       const isUpgrade = (newListPrice ?? 0) > (oldListPrice ?? 0);
 
       if (isUpgrade) {
         const { unusedOldValueCents, proratedNewCostCents, netCents, daysRemaining } =
-          this.computeUpgradeProration(existingSubscription!, plan, cycle);
+          this.computeUpgradeProration(existingSubscription!, plan, dto.billingCycle);
         const creditAvailable = existingSubscription!.creditBalanceCents;
         const amountPayableCents = Math.max(0, netCents - creditAvailable);
         const creditAppliedCents = Math.min(creditAvailable, netCents);
@@ -435,7 +451,7 @@ export class BillingService {
           amountPayableCents,
           creditAppliedCents,
           daysRemaining,
-          newPeriodEndPreview: new Date(Date.now() + PERIOD_MS[cycle]).toISOString(),
+          newPeriodEndPreview: new Date(Date.now() + PERIOD_MS[dto.billingCycle]).toISOString(),
           availableOn: null,
         };
       }

@@ -396,6 +396,10 @@ export class AdminService {
       include: { plan: true },
     });
     const isPlanChange = !!existing && existing.plan.id !== plan.id;
+    // A billing-cycle switch on the SAME plan (e.g. monthly -> annual) is
+    // also a "change" for the downgrade-blocking rule below — isPlanChange
+    // alone would miss a cycle-only switch and let it bypass the block.
+    const cycleChanged = !!existing && existing.billingCycle !== dto.billingCycle;
     // TRIALING counts as "mid-cycle" too — a downgrade shouldn't cut a trial
     // short just because no payment has actually been collected yet.
     const hasActivePeriod =
@@ -403,10 +407,10 @@ export class AdminService {
       !!existing.currentPeriodEnd &&
       existing.currentPeriodEnd > new Date();
 
-    if (isPlanChange && hasActivePeriod) {
-      const cycle = existing!.billingCycle;
-      const oldPrice = cycle === "ANNUAL" ? existing!.plan.priceYearlyCents : existing!.plan.priceMonthlyCents;
-      const newPrice = cycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
+    if ((isPlanChange || cycleChanged) && hasActivePeriod) {
+      const oldCycle = existing!.billingCycle;
+      const oldPrice = oldCycle === "ANNUAL" ? existing!.plan.priceYearlyCents : existing!.plan.priceMonthlyCents;
+      const newPrice = dto.billingCycle === "ANNUAL" ? plan.priceYearlyCents : plan.priceMonthlyCents;
       const isUpgrade = (newPrice ?? 0) > (oldPrice ?? 0);
 
       if (!isUpgrade) {
