@@ -1006,6 +1006,8 @@ export class AdminService {
       include: {
         createdByAdmin: { select: { name: true, email: true } },
         partner: { select: { name: true } },
+        organization: { select: { name: true, customerNumber: true } },
+        plan: { select: { name: true } },
       },
     });
     return { balanceCents: distributor.walletBalanceCents, transactions };

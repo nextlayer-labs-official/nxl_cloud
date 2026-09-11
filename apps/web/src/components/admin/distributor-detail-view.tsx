@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Plus } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { formatDate } from "@/lib/format";
+import { formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   AdminDistributorDetail,
@@ -351,7 +351,8 @@ export function DistributorDetailView({ distributorId }: { distributorId: string
                       </div>
                       <div className="text-ink-450">
                         {formatDate(tx.createdAt)}
-                        {tx.type === "DEBIT" && tx.partner && ` · ${tx.partner.name}`}
+                        {tx.organization && ` · ${formatCustomerCode(tx.organization.customerNumber)}`}
+                        {tx.type === "DEBIT" && tx.partner && ` · via ${tx.partner.name}`}
                         {tx.type === "CREDIT" && tx.createdByAdmin && ` · by ${tx.createdByAdmin.name}`}
                       </div>
                     </div>

@@ -130,18 +130,19 @@ model Organization {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  memberships          Membership[]
-  teams                Team[]
-  folders              Folder[]
-  files                File[]
-  auditLogs            AuditLog[]
-  subscription         Subscription?
-  payments             Payment[]
-  ssoConnection        SsoConnection?
-  stars                Star[]
-  partner              Partner?                   @relation(fields: [partnerId], references: [id], onDelete: SetNull)
-  partnerChangeRequest PartnerChangeRequest?
-  partnerWalletDebits  PartnerWalletTransaction[]
+  memberships             Membership[]
+  teams                   Team[]
+  folders                 Folder[]
+  files                   File[]
+  auditLogs               AuditLog[]
+  subscription            Subscription?
+  payments                Payment[]
+  ssoConnection           SsoConnection?
+  stars                   Star[]
+  partner                 Partner?                       @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  partnerChangeRequest    PartnerChangeRequest?
+  partnerWalletDebits     PartnerWalletTransaction[]
+  distributorWalletDebits DistributorWalletTransaction[]
 }
 
 model Membership {
@@ -593,7 +594,9 @@ model DistributorSession {
 /// One row per distributor wallet movement — an admin top-up (CREDIT,
 /// `createdByAdmin` + `note`) or an automatic debit when the distributor
 /// funds a partner's wallet (DEBIT, `partner` says which partner received it).
-/// `balanceAfterCents` snapshots the running balance right after this row.
+/// `balanceAfterCents` snapshots the running balance right after this row —
+/// it can be negative when the distributor's negative-balance toggle
+/// (`creditEnabled`) is on and a metered debit pushed it below zero.
 model DistributorWalletTransaction {
   id                String                       @id @default(cuid())
   distributorId     String
@@ -603,11 +606,17 @@ model DistributorWalletTransaction {
   note              String?
   createdByAdminId  String?
   partnerId         String?
+  /// Set on a metered DEBIT — the customer + plan whose activation charged
+  /// this distributor's wallet (alongside the partner's own wallet debit).
+  organizationId    String?
+  planId            String?
   createdAt         DateTime                     @default(now())
 
-  distributor    Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
-  createdByAdmin AdminUser?  @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
-  partner        Partner?    @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  distributor    Distributor   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  createdByAdmin AdminUser?    @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  partner        Partner?      @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  plan           Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
 
   @@index([distributorId, createdAt])
 }
@@ -657,11 +666,12 @@ model Plan {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  subscriptions       Subscription[]
-  payments            Payment[]
-  partnerPrices       PartnerPlanPrice[]
-  partnerWalletDebits PartnerWalletTransaction[]
-  distributorPrices   DistributorPlanPrice[]
+  subscriptions           Subscription[]
+  payments                Payment[]
+  partnerPrices           PartnerPlanPrice[]
+  partnerWalletDebits     PartnerWalletTransaction[]
+  distributorPrices       DistributorPlanPrice[]
+  distributorWalletDebits DistributorWalletTransaction[]
 }
 
 model Subscription {

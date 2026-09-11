@@ -249,6 +249,8 @@ export interface AdminDistributorWalletTransaction {
   createdAt: string;
   createdByAdmin: { name: string; email: string } | null;
   partner: { name: string } | null;
+  organization: { name: string; customerNumber: number } | null;
+  plan: { name: string } | null;
 }
 
 export interface AdminDistributorWallet {

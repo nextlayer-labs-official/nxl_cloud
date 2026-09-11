@@ -143,6 +143,12 @@ export class PartnerService {
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
 
+    const partner = await prisma.partner.findUniqueOrThrow({
+      where: { id: partnerId },
+      select: { distributorId: true },
+    });
+    const distributorId = partner.distributorId;
+
     const existingSubscription = await prisma.subscription.findUnique({
       where: { organizationId },
       include: { plan: true },
@@ -191,12 +197,33 @@ export class PartnerService {
         existingSubscription!.currentPeriodEnd!,
       );
 
+      // If this partner belongs to a distributor, the distributor's own
+      // wallet is charged too — same proration math, but against the
+      // admin-set distributor rate rather than the partner's price.
+      const distributorNetCents = distributorId
+        ? this.computeProration(
+            (await this.resolveDistributorRate(distributorId, existingSubscription!.plan, oldCycle)) ?? 0,
+            (await this.resolveDistributorRate(distributorId, plan, newCycle)) ?? 0,
+            oldCycle,
+            newCycle,
+            existingSubscription!.currentPeriodEnd!,
+          )
+        : 0;
+
       return prisma.$transaction(async (tx) => {
         await this.debitWallet(tx, partnerId, netCents, {
           organizationId,
           planId: plan.id,
           note: `Upgraded ${org.name} to ${plan.name} (prorated)`,
         });
+        if (distributorId) {
+          await this.debitDistributorWallet(tx, distributorId, distributorNetCents, {
+            partnerId,
+            organizationId,
+            planId: plan.id,
+            note: `${org.name} upgraded to ${plan.name} (prorated)`,
+          });
+        }
         return tx.subscription.update({
           where: { organizationId },
           data: {
@@ -214,12 +241,23 @@ export class PartnerService {
     // change made after the previous period already lapsed — full price,
     // fresh period, same as BillingService.createOrder's equivalent branch.
     const listPrice = await this.resolvePartnerPrice(partnerId, plan, dto.billingCycle);
+    const distributorFullRate = distributorId
+      ? await this.resolveDistributorRate(distributorId, plan, dto.billingCycle)
+      : null;
     return prisma.$transaction(async (tx) => {
       await this.debitWallet(tx, partnerId, listPrice ?? 0, {
         organizationId,
         planId: plan.id,
         note: `Set ${org.name} to ${plan.name}`,
       });
+      if (distributorId) {
+        await this.debitDistributorWallet(tx, distributorId, distributorFullRate ?? 0, {
+          partnerId,
+          organizationId,
+          planId: plan.id,
+          note: `${org.name} set to ${plan.name}`,
+        });
+      }
       return tx.subscription.upsert({
         where: { organizationId },
         create: {
@@ -237,6 +275,80 @@ export class PartnerService {
         },
         include: { plan: true },
       });
+    });
+  }
+
+  /** The distributor's admin-set rate for a plan, or the plan's list price if unset — charged to the distributor's own wallet alongside the partner's. */
+  private async resolveDistributorRate(
+    distributorId: string,
+    plan: { id: string; priceMonthlyCents: number | null; priceYearlyCents: number | null },
+    billingCycle: BillingCycle,
+  ) {
+    const override = await prisma.distributorPlanPrice.findUnique({
+      where: { distributorId_planId: { distributorId, planId: plan.id } },
+    });
+    if (billingCycle === "ANNUAL") return override?.priceYearlyCents ?? plan.priceYearlyCents;
+    return override?.priceMonthlyCents ?? plan.priceMonthlyCents;
+  }
+
+  /**
+   * Debits the distributor's own wallet in the caller's transaction, at the
+   * admin-set rate, whenever one of its partners activates/changes a
+   * customer's plan — the distributor's real cost for that change,
+   * separate from what the partner's own wallet pays. A zero/negative
+   * amount is a no-op, same convention as debitWallet.
+   *
+   * Whether this is allowed to push the balance negative depends on the
+   * distributor's `creditEnabled` flag (admin's "allow negative balance"
+   * toggle): enabled, the debit always goes through and any negative
+   * result is credit the distributor owes; disabled, it's a guarded
+   * decrement that throws (rolling back the whole transaction — the
+   * partner's own debit and the plan change too) if the balance can't
+   * cover it.
+   */
+  private async debitDistributorWallet(
+    tx: Tx,
+    distributorId: string,
+    amountCents: number,
+    context: { partnerId: string; organizationId: string; planId: string; note: string },
+  ) {
+    if (amountCents <= 0) return;
+
+    const distributor = await tx.distributor.findUniqueOrThrow({ where: { id: distributorId } });
+
+    let balanceAfterCents: number;
+    if (distributor.creditEnabled) {
+      const updated = await tx.distributor.update({
+        where: { id: distributorId },
+        data: { walletBalanceCents: { decrement: amountCents } },
+      });
+      balanceAfterCents = updated.walletBalanceCents;
+    } else {
+      const result = await tx.distributor.updateMany({
+        where: { id: distributorId, walletBalanceCents: { gte: amountCents } },
+        data: { walletBalanceCents: { decrement: amountCents } },
+      });
+      if (result.count === 0) {
+        const shortByCents = amountCents - distributor.walletBalanceCents;
+        throw new BadRequestException(
+          `This customer's distributor doesn't have enough wallet balance for this change (short ₹${(shortByCents / 100).toFixed(2)}) — ask them to contact the platform admin.`,
+        );
+      }
+      const updated = await tx.distributor.findUniqueOrThrow({ where: { id: distributorId } });
+      balanceAfterCents = updated.walletBalanceCents;
+    }
+
+    await tx.distributorWalletTransaction.create({
+      data: {
+        distributorId,
+        type: "DEBIT",
+        amountCents,
+        balanceAfterCents,
+        note: context.note,
+        partnerId: context.partnerId,
+        organizationId: context.organizationId,
+        planId: context.planId,
+      },
     });
   }
 
