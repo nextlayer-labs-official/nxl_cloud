@@ -30,14 +30,22 @@ const ACTION_LABELS: Record<string, string> = {
   "folder.access_request_denied": "declined a folder access request",
   "folder.invited": "invited someone by email to a folder",
   "organization.created": "created the organization",
+  "organization.suspended": "suspended the organization",
+  "organization.reactivated": "reactivated the organization",
+  "subscription.plan_changed": "changed the plan",
+  "settings.updated": "updated platform settings",
+  "member.invited": "invited a member",
+  "member.verified": "verified a member's email",
 };
 
 export function humanizeAuditAction(action: string): string {
   return ACTION_LABELS[action] ?? action;
 }
 
-export function auditActionCategory(action: string): "file" | "folder" | "other" {
+export function auditActionCategory(action: string): "file" | "folder" | "organization" | "settings" | "other" {
   if (action.startsWith("file.")) return "file";
   if (action.startsWith("folder.")) return "folder";
+  if (action.startsWith("organization.") || action.startsWith("subscription.") || action.startsWith("member.")) return "organization";
+  if (action.startsWith("settings.")) return "settings";
   return "other";
 }

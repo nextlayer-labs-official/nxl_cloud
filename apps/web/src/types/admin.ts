@@ -113,11 +113,18 @@ export interface AdminOverview {
   totalStorageUsedBytes: number;
   /** Soft-deleted files still sitting in S3 (still billed by the provider) until permanently purged from trash — not counted in totalStorageUsedBytes or any customer's active quota. */
   totalTrashedBytes: number;
+  /** Bytes by category among currently-active (non-trashed) files — "documents" is an allowlist (mimeType has no shared prefix the way image/video do); "others" is the remainder. */
+  storageByCategory: { documents: number; images: number; videos: number; others: number };
   subscriptionsByStatus: Record<SubscriptionStatus, number>;
   /** Derived from currently-ACTIVE subscriptions' plan pricing — an estimate, not a guaranteed recurring charge (billing is one-time orders, not auto-renewing subscriptions). */
   estimatedMrrCents: number;
   revenue: { allTimeCents: number; last30dCents: number };
+  /** Trailing 6 calendar months of REALIZED revenue (real captured Payments) + new-org counts — independent of the `period`/`deltas` date range below. */
+  revenueTrend: { month: string; label: string; revenueCents: number; newOrgs: number }[];
   signups: { last7d: number; last30d: number };
+  period: { from: string; to: string };
+  /** % change between the value as of `period.to` and as of `period.from`. `mrr` is the least exact — see AdminService.getOverview's own comment on why it's only an approximation. */
+  deltas: { organizations: number; users: number; storageBytes: number; mrr: number };
 }
 
 export interface AdminPartner {
@@ -264,8 +271,11 @@ export interface AdminAuditLogEntry {
   targetType: string | null;
   targetId: string | null;
   createdAt: string;
-  organization: { name: string; slug: string };
+  /** Null for a platform-level action with no single associated org (e.g. a settings change). */
+  organization: { name: string; slug: string } | null;
+  /** Null for an admin-originated action — check `metadata.adminName`/`adminEmail` instead. */
   actor: { name: string; email: string } | null;
+  metadata: Record<string, unknown> | null;
 }
 
 /** Platform-wide toggles — the Razorpay kill-switch, and which storage provider new uploads go to (see /admin/settings). */
@@ -277,4 +287,55 @@ export interface AdminPlatformSettings {
   availableStorageProviders: string[];
   updatedAt: string | null;
   updatedByName: string | null;
+}
+
+// --- Cross-org admin pages (Users / Billing & Invoices / Storage & Usage / search) ---
+
+export interface AdminUserListItem {
+  id: string;
+  name: string;
+  email: string;
+  emailVerifiedAt: string | null;
+  createdAt: string;
+  /** A user can belong to more than one org (a share-invited collaborator, for instance) — real detail/actions still live on each org's own member list. */
+  organizations: { id: string; name: string; role: string }[];
+}
+
+export interface AdminUserList {
+  total: number;
+  page: number;
+  pageSize: number;
+  users: AdminUserListItem[];
+}
+
+export interface AdminPaymentListItem {
+  id: string;
+  organizationId: string;
+  planId: string;
+  amountCents: number;
+  currency: string;
+  billingCycle: "MONTHLY" | "ANNUAL";
+  razorpayOrderId: string | null;
+  razorpayPaymentId: string | null;
+  createdAt: string;
+  organization: { id: string; name: string };
+  plan: { name: string };
+}
+
+export interface AdminPaymentList {
+  total: number;
+  page: number;
+  pageSize: number;
+  payments: AdminPaymentListItem[];
+}
+
+export interface AdminStorageUsage {
+  byCategory: { documents: number; images: number; videos: number; others: number };
+  organizations: { id: string; name: string; usedBytes: number; limitBytes: number | null }[];
+}
+
+export interface AdminSearchResults {
+  organizations: { id: string; name: string; slug: string }[];
+  users: { id: string; name: string; email: string }[];
+  payments: { id: string; amountCents: number; createdAt: string; organization: { id: string; name: string } }[];
 }

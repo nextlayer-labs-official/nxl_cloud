@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma, type BillingCycle } from "@nextlayer/database";
+import { recordAuditLog } from "../audit/audit-log.util";
 import { hashPassword } from "../auth/password.util";
 import { sendVerificationEmailFor } from "../auth/verification-token.util";
 import { EmailService } from "../email/email.service";
@@ -27,6 +28,13 @@ const MONTHLY_PERIOD_MS = 30 * DAY_MS;
 const PERIOD_MS: Record<BillingCycle, number> = { MONTHLY: MONTHLY_PERIOD_MS, ANNUAL: 365 * DAY_MS };
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 
+/** The bits of `req.adminUser` needed to attribute an admin-originated audit-log row — stashed in `metadata` since AuditLog.actorId is an FK to the customer-portal User model, not AdminUser. */
+interface AdminActor {
+  id: string;
+  name: string;
+  email: string;
+}
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -34,7 +42,7 @@ export class AdminService {
     private readonly storage: StorageService,
   ) {}
 
-  async createCustomer(dto: CreateCustomerDto) {
+  async createCustomer(dto: CreateCustomerDto, adminUser: AdminActor) {
     const email = dto.email.toLowerCase().trim();
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -49,7 +57,7 @@ export class AdminService {
       (await prisma.plan.findFirst({ where: { isDefault: true } })) ??
       (await prisma.plan.findFirst({ orderBy: { createdAt: "asc" } }));
 
-    return prisma.$transaction(async (tx) => {
+    const organization = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({ data: { name: dto.name, email, passwordHash } });
       const organization = await tx.organization.create({ data: { name: workspaceName, slug } });
       await tx.membership.create({
@@ -68,13 +76,23 @@ export class AdminService {
           },
         });
       }
-      return {
-        id: organization.id,
-        customerNumber: organization.customerNumber,
-        name: organization.name,
-        slug: organization.slug,
-      };
+      return organization;
     });
+
+    await recordAuditLog({
+      organizationId: organization.id,
+      action: "organization.created",
+      targetType: "ORGANIZATION",
+      targetId: organization.id,
+      metadata: { adminName: adminUser.name, adminEmail: adminUser.email, orgName: organization.name },
+    });
+
+    return {
+      id: organization.id,
+      customerNumber: organization.customerNumber,
+      name: organization.name,
+      slug: organization.slug,
+    };
   }
 
   async listOrganizations() {
@@ -283,14 +301,30 @@ export class AdminService {
     });
   }
 
-  async suspendOrganization(id: string) {
-    await this.requireOrganization(id);
-    return prisma.organization.update({ where: { id }, data: { suspendedAt: new Date() } });
+  async suspendOrganization(id: string, adminUser: AdminActor) {
+    const org = await this.requireOrganization(id);
+    const updated = await prisma.organization.update({ where: { id }, data: { suspendedAt: new Date() } });
+    await recordAuditLog({
+      organizationId: id,
+      action: "organization.suspended",
+      targetType: "ORGANIZATION",
+      targetId: id,
+      metadata: { adminName: adminUser.name, adminEmail: adminUser.email, orgName: org.name },
+    });
+    return updated;
   }
 
-  async reactivateOrganization(id: string) {
-    await this.requireOrganization(id);
-    return prisma.organization.update({ where: { id }, data: { suspendedAt: null } });
+  async reactivateOrganization(id: string, adminUser: AdminActor) {
+    const org = await this.requireOrganization(id);
+    const updated = await prisma.organization.update({ where: { id }, data: { suspendedAt: null } });
+    await recordAuditLog({
+      organizationId: id,
+      action: "organization.reactivated",
+      targetType: "ORGANIZATION",
+      targetId: id,
+      metadata: { adminName: adminUser.name, adminEmail: adminUser.email, orgName: org.name },
+    });
+    return updated;
   }
 
   /** Scopes the target user to this specific org, so an admin acting on one org's detail page can't accidentally touch a member of a different org via a mismatched id. */
@@ -325,8 +359,8 @@ export class AdminService {
     return { success: true };
   }
 
-  async updateSubscription(id: string, dto: UpdateSubscriptionDto) {
-    await this.requireOrganization(id);
+  async updateSubscription(id: string, dto: UpdateSubscriptionDto, adminUser: AdminActor) {
+    const org = await this.requireOrganization(id);
 
     if (dto.planId) {
       const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
@@ -337,6 +371,14 @@ export class AdminService {
     if (!existing && !dto.planId) {
       throw new NotFoundException("No subscription exists yet — provide a planId to create one.");
     }
+
+    await recordAuditLog({
+      organizationId: id,
+      action: "subscription.plan_changed",
+      targetType: "ORGANIZATION",
+      targetId: id,
+      metadata: { adminName: adminUser.name, adminEmail: adminUser.email, orgName: org.name, override: true },
+    });
 
     // Deliberately update/create instead of upsert: passing `planId: undefined` in an
     // upsert's unused `create` branch confuses Prisma's checked/unchecked input
@@ -390,8 +432,8 @@ export class AdminService {
    * comps, backdating, or forcing an immediate downgrade (e.g. a refund
    * case), use `updateSubscription` (the advanced override) instead.
    */
-  async changePlan(id: string, dto: ChangePlanDto) {
-    await this.requireOrganization(id);
+  async changePlan(id: string, dto: ChangePlanDto, adminUser: AdminActor) {
+    const org = await this.requireOrganization(id);
     const plan = await prisma.plan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException("Plan not found.");
 
@@ -425,7 +467,7 @@ export class AdminService {
       }
     }
 
-    return prisma.subscription.upsert({
+    const updated = await prisma.subscription.upsert({
       where: { organizationId: id },
       create: {
         organizationId: id,
@@ -442,6 +484,16 @@ export class AdminService {
       },
       include: { plan: true },
     });
+
+    await recordAuditLog({
+      organizationId: id,
+      action: "subscription.plan_changed",
+      targetType: "ORGANIZATION",
+      targetId: id,
+      metadata: { adminName: adminUser.name, adminEmail: adminUser.email, orgName: org.name, planName: plan.name },
+    });
+
+    return updated;
   }
 
   async listPlans() {
@@ -517,52 +569,18 @@ export class AdminService {
     await prisma.plan.delete({ where: { id } });
   }
 
-  /**
-   * Top-line platform KPIs for the admin dashboard landing page. `estimatedMrrCents`
-   * is exactly that — an estimate derived from currently-ACTIVE subscriptions' plan
-   * pricing, not a guaranteed recurring charge, since billing here is one-time
-   * Razorpay orders per period (see Subscription's schema comment), not auto-renewing
-   * subscriptions. `realizedRevenueCents` is the real number, from actual captured Payments.
-   */
-  async getOverview() {
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * DAY_MS);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * DAY_MS);
-
-    const [
-      totalOrganizations,
-      suspendedOrganizations,
-      totalUsers,
-      storageAgg,
-      trashAgg,
-      subscriptionsByStatus,
-      activeSubscriptions,
-      revenueAllTimeAgg,
-      revenueLast30dAgg,
-      signups7d,
-      signups30d,
-    ] = await Promise.all([
-      prisma.organization.count(),
-      prisma.organization.count({ where: { suspendedAt: { not: null } } }),
-      prisma.user.count(),
-      prisma.file.aggregate({ where: { deletedAt: null }, _sum: { sizeBytes: true } }),
-      // Soft-deleted files still sit in S3 (and still cost us) until permanently
-      // purged from trash — tracked separately since it's real spend that
-      // doesn't count toward any customer's active quota.
-      prisma.file.aggregate({ where: { deletedAt: { not: null } }, _sum: { sizeBytes: true } }),
-      prisma.subscription.groupBy({ by: ["status"], _count: true }),
-      prisma.subscription.findMany({
-        where: { status: "ACTIVE" },
-        include: { plan: { select: { priceMonthlyCents: true, priceYearlyCents: true } } },
-      }),
-      prisma.payment.aggregate({ _sum: { amountCents: true } }),
-      prisma.payment.aggregate({ where: { createdAt: { gte: thirtyDaysAgo } }, _sum: { amountCents: true } }),
-      prisma.organization.count({ where: { createdAt: { gte: sevenDaysAgo } } }),
-      prisma.organization.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
-    ]);
-
-    const estimatedMrrCents = activeSubscriptions.reduce((sum, sub) => {
-      if (sub.freeUntil && sub.freeUntil > now) return sum;
+  /** Sums an ACTIVE subscription list into a monthly-equivalent total, priced at each subscription's own plan (annual halved to monthly), minus any discount, skipping ones in a free/comped period as of `asOf`. Shared by the live `estimatedMrrCents` and the approximate historical comparison in `getOverview`'s `deltas.mrr` (see that method's own comment on why the past figure is only approximate). */
+  private computeMrr(
+    subs: {
+      billingCycle: BillingCycle;
+      discountPercent: number | null;
+      freeUntil: Date | null;
+      plan: { priceMonthlyCents: number | null; priceYearlyCents: number | null };
+    }[],
+    asOf: Date,
+  ): number {
+    return subs.reduce((sum, sub) => {
+      if (sub.freeUntil && sub.freeUntil > asOf) return sum;
       const listPriceCents =
         sub.billingCycle === "ANNUAL"
           ? sub.plan.priceYearlyCents !== null
@@ -575,11 +593,154 @@ export class AdminService {
         : listPriceCents;
       return sum + discounted;
     }, 0);
+  }
+
+  /**
+   * Total bytes broken down by file category — shared between the Overview
+   * page's donut and the dedicated Storage & Usage page. "Documents" is an
+   * allowlist (mimeType has no shared prefix the way image/video do);
+   * "others" is whatever's left over, not a fourth query.
+   */
+  private async getStorageByCategory(where: { deletedAt: null } = { deletedAt: null }) {
+    const [totalAgg, imagesAgg, videosAgg, documentsAgg] = await Promise.all([
+      prisma.file.aggregate({ where, _sum: { sizeBytes: true } }),
+      prisma.file.aggregate({ where: { ...where, mimeType: { startsWith: "image/" } }, _sum: { sizeBytes: true } }),
+      prisma.file.aggregate({ where: { ...where, mimeType: { startsWith: "video/" } }, _sum: { sizeBytes: true } }),
+      prisma.file.aggregate({
+        where: {
+          ...where,
+          OR: [
+            { mimeType: { startsWith: "application/pdf" } },
+            { mimeType: { startsWith: "application/msword" } },
+            { mimeType: { startsWith: "application/vnd.openxmlformats-officedocument" } },
+            { mimeType: { startsWith: "application/vnd.ms-" } },
+            { mimeType: { startsWith: "text/" } },
+          ],
+        },
+        _sum: { sizeBytes: true },
+      }),
+    ]);
+    const total = totalAgg._sum.sizeBytes ?? 0;
+    const images = imagesAgg._sum.sizeBytes ?? 0;
+    const videos = videosAgg._sum.sizeBytes ?? 0;
+    const documents = documentsAgg._sum.sizeBytes ?? 0;
+    return { documents, images, videos, others: Math.max(0, total - images - videos - documents) };
+  }
+
+  /** Total bytes across files that existed and weren't yet (or hadn't yet been trashed) as of `asOf` — reconstructs a past storage total from `createdAt`/`deletedAt` rather than needing a snapshot table. */
+  private async storageBytesAsOf(asOf: Date): Promise<number> {
+    const agg = await prisma.file.aggregate({
+      where: { createdAt: { lte: asOf }, OR: [{ deletedAt: null }, { deletedAt: { gt: asOf } } as { deletedAt: { gt: Date } }] },
+      _sum: { sizeBytes: true },
+    });
+    return agg._sum.sizeBytes ?? 0;
+  }
+
+  /**
+   * Top-line platform KPIs for the admin dashboard landing page. `estimatedMrrCents`
+   * is exactly that — an estimate derived from currently-ACTIVE subscriptions' plan
+   * pricing, not a guaranteed recurring charge, since billing here is one-time
+   * Razorpay orders per period (see Subscription's schema comment), not auto-renewing
+   * subscriptions. `realizedRevenueCents` is the real number, from actual captured Payments.
+   *
+   * `from`/`to` (default: last 30 days) drive `deltas` — each a % change
+   * between the value as of `to` and the value as of `from`. `deltas.mrr` is
+   * the least exact of the four: there's no historical MRR snapshot to
+   * reconstruct, so it approximates "MRR as of `from`" using subscriptions
+   * that already existed by then, priced at their *current* plan rate (past
+   * pricing isn't tracked either). `revenueTrend` is independent of
+   * `from`/`to` — it's always the trailing 6 calendar months of *realized*
+   * revenue (actual captured Payments), which needs no approximation at all.
+   */
+  async getOverview(from?: string, to?: string) {
+    const now = new Date();
+    const periodEnd = to ? new Date(to) : now;
+    const periodStart = from ? new Date(from) : new Date(periodEnd.getTime() - 30 * DAY_MS);
+
+    const [
+      totalOrganizations,
+      suspendedOrganizations,
+      totalUsers,
+      trashAgg,
+      subscriptionsByStatus,
+      activeSubscriptions,
+      revenueAllTimeAgg,
+      revenueLast30dAgg,
+      signups7d,
+      signups30d,
+      storageByCategory,
+      storageAsOfEnd,
+      storageAsOfStart,
+      organizationsAsOfEnd,
+      organizationsAsOfStart,
+      usersAsOfEnd,
+      usersAsOfStart,
+      subsCreatedBeforeStart,
+    ] = await Promise.all([
+      prisma.organization.count(),
+      prisma.organization.count({ where: { suspendedAt: { not: null } } }),
+      prisma.user.count(),
+      // Soft-deleted files still sit in S3 (and still cost us) until permanently
+      // purged from trash — tracked separately since it's real spend that
+      // doesn't count toward any customer's active quota.
+      prisma.file.aggregate({ where: { deletedAt: { not: null } }, _sum: { sizeBytes: true } }),
+      prisma.subscription.groupBy({ by: ["status"], _count: true }),
+      prisma.subscription.findMany({
+        where: { status: "ACTIVE" },
+        include: { plan: { select: { priceMonthlyCents: true, priceYearlyCents: true } } },
+      }),
+      prisma.payment.aggregate({ _sum: { amountCents: true } }),
+      prisma.payment.aggregate({ where: { createdAt: { gte: new Date(now.getTime() - 30 * DAY_MS) } }, _sum: { amountCents: true } }),
+      prisma.organization.count({ where: { createdAt: { gte: new Date(now.getTime() - 7 * DAY_MS) } } }),
+      prisma.organization.count({ where: { createdAt: { gte: new Date(now.getTime() - 30 * DAY_MS) } } }),
+      this.getStorageByCategory(),
+      this.storageBytesAsOf(periodEnd),
+      this.storageBytesAsOf(periodStart),
+      prisma.organization.count({ where: { createdAt: { lte: periodEnd } } }),
+      prisma.organization.count({ where: { createdAt: { lte: periodStart } } }),
+      prisma.user.count({ where: { createdAt: { lte: periodEnd } } }),
+      prisma.user.count({ where: { createdAt: { lte: periodStart } } }),
+      prisma.subscription.findMany({
+        where: { status: "ACTIVE", createdAt: { lte: periodStart } },
+        include: { plan: { select: { priceMonthlyCents: true, priceYearlyCents: true } } },
+      }),
+    ]);
+
+    const estimatedMrrCents = this.computeMrr(activeSubscriptions, now);
+    const mrrAsOfStart = this.computeMrr(subsCreatedBeforeStart, periodStart);
+
+    const percentChange = (current: number, previous: number): number => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return Math.round(((current - previous) / previous) * 100);
+    };
 
     const statusCounts: Record<string, number> = { TRIALING: 0, ACTIVE: 0, PAST_DUE: 0, CANCELED: 0 };
     for (const row of subscriptionsByStatus) {
       statusCounts[row.status] = row._count;
     }
+
+    // Trailing 6 calendar months of REALIZED revenue (real Payment rows, not
+    // reconstructed MRR — see this method's own doc comment) + new-org counts
+    // for the same months, for the Revenue Trend chart.
+    const monthStarts = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      return d;
+    });
+    const revenueTrend = await Promise.all(
+      monthStarts.map(async (monthStart) => {
+        const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+        const [revenueAgg, newOrgs] = await Promise.all([
+          prisma.payment.aggregate({ where: { createdAt: { gte: monthStart, lt: monthEnd } }, _sum: { amountCents: true } }),
+          prisma.organization.count({ where: { createdAt: { gte: monthStart, lt: monthEnd } } }),
+        ]);
+        return {
+          month: `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`,
+          label: monthStart.toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+          revenueCents: revenueAgg._sum.amountCents ?? 0,
+          newOrgs,
+        };
+      }),
+    );
 
     return {
       organizations: {
@@ -588,16 +749,146 @@ export class AdminService {
         suspended: suspendedOrganizations,
       },
       totalUsers,
-      totalStorageUsedBytes: storageAgg._sum.sizeBytes ?? 0,
+      totalStorageUsedBytes: storageAsOfEnd,
       totalTrashedBytes: trashAgg._sum.sizeBytes ?? 0,
+      storageByCategory,
       subscriptionsByStatus: statusCounts,
       estimatedMrrCents,
       revenue: {
         allTimeCents: revenueAllTimeAgg._sum.amountCents ?? 0,
         last30dCents: revenueLast30dAgg._sum.amountCents ?? 0,
       },
+      revenueTrend,
       signups: { last7d: signups7d, last30d: signups30d },
+      period: { from: periodStart.toISOString(), to: periodEnd.toISOString() },
+      deltas: {
+        organizations: percentChange(organizationsAsOfEnd, organizationsAsOfStart),
+        users: percentChange(usersAsOfEnd, usersAsOfStart),
+        storageBytes: percentChange(storageAsOfEnd, storageAsOfStart),
+        mrr: percentChange(estimatedMrrCents, mrrAsOfStart),
+      },
     };
+  }
+
+  /** Cross-org user directory for the admin "Users" page — a user's real detail (role, verification actions) still lives in their org's own member list, this is just a platform-wide index. */
+  async listUsers(search?: string, page = 1, pageSize = 50) {
+    const where = search
+      ? { OR: [{ name: { contains: search } }, { email: { contains: search } }] }
+      : undefined;
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          memberships: { include: { organization: { select: { id: true, name: true } } } },
+        },
+      }),
+    ]);
+    return {
+      total,
+      page,
+      pageSize,
+      users: users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        emailVerifiedAt: u.emailVerifiedAt,
+        createdAt: u.createdAt,
+        organizations: u.memberships.map((m) => ({
+          id: m.organization.id,
+          name: m.organization.name,
+          role: m.role,
+        })),
+      })),
+    };
+  }
+
+  /** Platform-wide payments/invoices listing — generalizes getOrganizationTransactions to an optional org filter for the admin "Billing & Invoices" page. */
+  async listPayments(organizationId?: string, page = 1, pageSize = 50) {
+    const where = organizationId ? { organizationId } : undefined;
+    const [total, payments] = await Promise.all([
+      prisma.payment.count({ where }),
+      prisma.payment.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          organization: { select: { id: true, name: true } },
+          plan: { select: { name: true } },
+        },
+      }),
+    ]);
+    return { total, page, pageSize, payments };
+  }
+
+  /** Platform totals by file category (shared with the Overview donut) plus a per-org breakdown, for the admin "Storage & Usage" page. */
+  async getStorageUsage() {
+    const [byCategory, organizations] = await Promise.all([
+      this.getStorageByCategory(),
+      prisma.organization.findMany({
+        select: { id: true, name: true, subscription: { include: { plan: { select: { storageLimitGb: true } } } } },
+        orderBy: { name: "asc" },
+      }),
+    ]);
+
+    const perOrg = await Promise.all(
+      organizations.map(async (org) => {
+        const agg = await prisma.file.aggregate({
+          where: { organizationId: org.id, deletedAt: null },
+          _sum: { sizeBytes: true },
+        });
+        const limitGb = org.subscription?.storageLimitGbOverride ?? org.subscription?.plan.storageLimitGb ?? null;
+        return {
+          id: org.id,
+          name: org.name,
+          usedBytes: agg._sum.sizeBytes ?? 0,
+          limitBytes: limitGb !== null ? limitGb * BYTES_PER_GB : null,
+        };
+      }),
+    );
+
+    return { byCategory, organizations: perOrg };
+  }
+
+  /** Cross-entity search for the admin command palette — capped small per type since it's a quick-jump picker, not a full search results page. */
+  async search(query: string) {
+    const q = query.trim();
+    if (!q) return { organizations: [], users: [], payments: [] };
+
+    const [organizations, users, payments] = await Promise.all([
+      prisma.organization.findMany({
+        where: { OR: [{ name: { contains: q } }, { slug: { contains: q } }] },
+        select: { id: true, name: true, slug: true },
+        take: 5,
+      }),
+      prisma.user.findMany({
+        where: { OR: [{ name: { contains: q } }, { email: { contains: q } }] },
+        select: { id: true, name: true, email: true },
+        take: 5,
+      }),
+      prisma.payment.findMany({
+        where: {
+          OR: [
+            { razorpayOrderId: { contains: q } },
+            { razorpayPaymentId: { contains: q } },
+            { organization: { name: { contains: q } } },
+          ],
+        },
+        select: {
+          id: true,
+          amountCents: true,
+          createdAt: true,
+          organization: { select: { id: true, name: true } },
+        },
+        take: 5,
+      }),
+    ]);
+
+    return { organizations, users, payments };
   }
 
   async listAuditLog(take = 50, organizationId?: string) {
@@ -1052,7 +1343,7 @@ export class AdminService {
   }
 
   /** Each field is independently optional — a call only touches the setting(s) it actually includes. */
-  async updateSettings(adminId: string, dto: UpdatePlatformSettingsDto) {
+  async updateSettings(adminId: string, dto: UpdatePlatformSettingsDto, adminUser: AdminActor) {
     if (dto.paymentsEnabled !== undefined) {
       await setPaymentsEnabled(dto.paymentsEnabled, adminId);
     }
@@ -1065,6 +1356,13 @@ export class AdminService {
       }
       await setDefaultStorageProvider(dto.defaultStorageProvider, adminId);
     }
+
+    await recordAuditLog({
+      action: "settings.updated",
+      targetType: "SETTINGS",
+      metadata: { adminName: adminUser.name, adminEmail: adminUser.email, changed: Object.keys(dto) },
+    });
+
     return this.getSettings();
   }
 }

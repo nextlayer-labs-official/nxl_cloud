@@ -1,13 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, File, Folder } from "lucide-react";
+import { Building2, File, Folder, Settings, Shield } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { AdminAuditLogEntry, AdminOrganization } from "@/types/admin";
 import { auditActionCategory, humanizeAuditAction } from "./audit-action-labels";
 
-const CATEGORY_ICONS = { file: File, folder: Folder, other: Building2 } as const;
+const CATEGORY_ICONS = {
+  file: File,
+  folder: Folder,
+  organization: Building2,
+  settings: Settings,
+  other: Shield,
+} as const;
+
+/** Admin-originated rows have no `actor` (that FK is the customer-portal User model, not AdminUser) — their identity is stashed in `metadata` instead. */
+function actorName(entry: AdminAuditLogEntry): string {
+  if (entry.actor) return entry.actor.name;
+  const adminName = entry.metadata?.adminName;
+  return typeof adminName === "string" ? adminName : "System";
+}
+
+function actorSubtitle(entry: AdminAuditLogEntry): string | null {
+  if (entry.actor) return entry.actor.email;
+  const adminEmail = entry.metadata?.adminEmail;
+  return typeof adminEmail === "string" ? adminEmail : null;
+}
 
 export function AuditLogView() {
   const [entries, setEntries] = useState<AdminAuditLogEntry[] | null>(null);
@@ -77,12 +96,11 @@ export function AuditLogView() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-foreground text-sm font-medium">
-                    <span className="font-semibold">{entry.actor?.name ?? "System"}</span>{" "}
-                    {humanizeAuditAction(entry.action)}
+                    <span className="font-semibold">{actorName(entry)}</span> {humanizeAuditAction(entry.action)}
                   </div>
                   <div className="text-ink-450 text-[12px]">
-                    {entry.organization.name}
-                    {entry.actor && ` · ${entry.actor.email}`}
+                    {entry.organization?.name ?? "Platform-wide"}
+                    {actorSubtitle(entry) && ` · ${actorSubtitle(entry)}`}
                   </div>
                 </div>
                 <div className="text-ink-450 shrink-0 text-[12px]">

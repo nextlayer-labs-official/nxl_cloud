@@ -34,8 +34,8 @@ export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Get("overview")
-  getOverview() {
-    return this.adminService.getOverview();
+  getOverview(@Query("from") from?: string, @Query("to") to?: string) {
+    return this.adminService.getOverview(from, to);
   }
 
   @Get("organizations")
@@ -54,20 +54,20 @@ export class AdminController {
   }
 
   @Post("customers")
-  createCustomer(@Body() dto: CreateCustomerDto) {
-    return this.adminService.createCustomer(dto);
+  createCustomer(@Req() req: Request, @Body() dto: CreateCustomerDto) {
+    return this.adminService.createCustomer(dto, req.adminUser!);
   }
 
   @Post("organizations/:id/suspend")
   @HttpCode(HttpStatus.OK)
-  suspendOrganization(@Param("id") id: string) {
-    return this.adminService.suspendOrganization(id);
+  suspendOrganization(@Req() req: Request, @Param("id") id: string) {
+    return this.adminService.suspendOrganization(id, req.adminUser!);
   }
 
   @Post("organizations/:id/reactivate")
   @HttpCode(HttpStatus.OK)
-  reactivateOrganization(@Param("id") id: string) {
-    return this.adminService.reactivateOrganization(id);
+  reactivateOrganization(@Req() req: Request, @Param("id") id: string) {
+    return this.adminService.reactivateOrganization(id, req.adminUser!);
   }
 
   @Post("organizations/:id/members/:userId/verify-email")
@@ -83,13 +83,13 @@ export class AdminController {
   }
 
   @Patch("organizations/:id/subscription")
-  updateSubscription(@Param("id") id: string, @Body() dto: UpdateSubscriptionDto) {
-    return this.adminService.updateSubscription(id, dto);
+  updateSubscription(@Req() req: Request, @Param("id") id: string, @Body() dto: UpdateSubscriptionDto) {
+    return this.adminService.updateSubscription(id, dto, req.adminUser!);
   }
 
   @Patch("organizations/:id/plan")
-  changePlan(@Param("id") id: string, @Body() dto: ChangePlanDto) {
-    return this.adminService.changePlan(id, dto);
+  changePlan(@Req() req: Request, @Param("id") id: string, @Body() dto: ChangePlanDto) {
+    return this.adminService.changePlan(id, dto, req.adminUser!);
   }
 
   @Get("plans")
@@ -120,6 +120,28 @@ export class AdminController {
       parsed && !Number.isNaN(parsed) ? parsed : undefined,
       organizationId,
     );
+  }
+
+  @Get("users")
+  listUsers(@Query("search") search?: string, @Query("page") page?: string) {
+    const parsedPage = page ? Number.parseInt(page, 10) : undefined;
+    return this.adminService.listUsers(search, parsedPage && !Number.isNaN(parsedPage) ? parsedPage : undefined);
+  }
+
+  @Get("payments")
+  listPayments(@Query("organizationId") organizationId?: string, @Query("page") page?: string) {
+    const parsedPage = page ? Number.parseInt(page, 10) : undefined;
+    return this.adminService.listPayments(organizationId, parsedPage && !Number.isNaN(parsedPage) ? parsedPage : undefined);
+  }
+
+  @Get("storage-usage")
+  getStorageUsage() {
+    return this.adminService.getStorageUsage();
+  }
+
+  @Get("search")
+  search(@Query("q") q?: string) {
+    return this.adminService.search(q ?? "");
   }
 
   @Get("partners")
@@ -248,6 +270,6 @@ export class AdminController {
 
   @Patch("settings")
   updateSettings(@Req() req: Request, @Body() dto: UpdatePlatformSettingsDto) {
-    return this.adminService.updateSettings(req.adminUser!.id, dto);
+    return this.adminService.updateSettings(req.adminUser!.id, dto, req.adminUser!);
   }
 }

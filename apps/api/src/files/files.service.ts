@@ -117,7 +117,7 @@ export class FilesService {
   }
 
   private async logFileActivity(file: { organizationId: string; id: string }, actorId: string, action: string, metadata?: Record<string, unknown>) {
-    await recordAuditLog(file.organizationId, actorId, action, "FILE", file.id, metadata);
+    await recordAuditLog({ organizationId: file.organizationId, actorId, action, targetType: "FILE", targetId: file.id, metadata });
   }
 
   private async getOwnedFile(userId: string, fileId: string) {

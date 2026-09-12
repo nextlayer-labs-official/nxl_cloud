@@ -199,7 +199,7 @@ export class FoldersService {
   }
 
   private async logFolderActivity(folder: { organizationId: string; id: string }, actorId: string, action: string, metadata?: Record<string, unknown>) {
-    await recordAuditLog(folder.organizationId, actorId, action, "FOLDER", folder.id, metadata);
+    await recordAuditLog({ organizationId: folder.organizationId, actorId, action, targetType: "FOLDER", targetId: folder.id, metadata });
   }
 
   /**
