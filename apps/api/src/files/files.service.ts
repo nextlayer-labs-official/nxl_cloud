@@ -79,9 +79,9 @@ export class FilesService {
     await this.organizations.assertWithinQuota(organizationId, dto.sizeBytes);
 
     const storageKey = this.storage.buildKey(orgSlug, dto.name);
-    const uploadUrl = await this.storage.getUploadUrl(storageKey, dto.mimeType);
+    const { uploadUrl, storageProvider } = await this.storage.getUploadUrl(storageKey, dto.mimeType);
 
-    return { uploadUrl, storageKey };
+    return { uploadUrl, storageKey, storageProvider };
   }
 
   async confirmUpload(userId: string, dto: ConfirmUploadDto) {
@@ -96,6 +96,7 @@ export class FilesService {
           mimeType: dto.mimeType,
           sizeBytes: dto.sizeBytes,
           storageKey: dto.storageKey,
+          storageProvider: dto.storageProvider,
           uploadedById: userId,
         },
       });
@@ -104,6 +105,7 @@ export class FilesService {
           fileId: created.id,
           versionNumber: 1,
           storageKey: dto.storageKey,
+          storageProvider: dto.storageProvider,
           sizeBytes: dto.sizeBytes,
           createdById: userId,
         },
@@ -157,14 +159,14 @@ export class FilesService {
 
   async getDownloadUrl(userId: string, fileId: string) {
     const file = await this.getAccessibleFile(userId, fileId, "VIEWER");
-    const downloadUrl = await this.storage.getDownloadUrl(file.storageKey, file.name);
+    const downloadUrl = await this.storage.getDownloadUrl(file.storageProvider, file.storageKey, file.name);
     return { downloadUrl };
   }
 
   /** Same object, but `Content-Disposition: inline` so the browser renders it (img/iframe/etc) instead of downloading. */
   async getPreviewUrl(userId: string, fileId: string) {
     const file = await this.getAccessibleFile(userId, fileId, "VIEWER");
-    const previewUrl = await this.storage.getDownloadUrl(file.storageKey, file.name, true);
+    const previewUrl = await this.storage.getDownloadUrl(file.storageProvider, file.storageKey, file.name, true);
     return { previewUrl };
   }
 
@@ -179,7 +181,7 @@ export class FilesService {
   }
 
   /**
-   * Soft delete only — moves the file to Trash. The Wasabi object is kept
+   * Soft delete only — moves the file to Trash. The storage object is kept
    * until `permanentlyDelete` is called, so `restore` has something to
    * restore. EDITOR-minimum (not owner-only) — matches Dropbox/Drive, where
    * an editor on shared content can delete it; restoring/permanently
@@ -256,7 +258,7 @@ export class FilesService {
 
   async permanentlyDelete(userId: string, fileId: string) {
     const file = await this.getTrashedFile(userId, fileId);
-    await this.storage.deleteObject(file.storageKey);
+    await this.storage.deleteObject(file.storageProvider, file.storageKey);
     await prisma.file.delete({ where: { id: file.id } });
     await this.logFileActivity(file, userId, "file.deleted");
   }

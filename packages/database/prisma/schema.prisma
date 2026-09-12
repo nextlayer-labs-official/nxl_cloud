@@ -211,17 +211,21 @@ model Folder {
 }
 
 model File {
-  id             String    @id @default(cuid())
-  organizationId String
-  folderId       String?
-  name           String
-  mimeType       String
-  sizeBytes      Int
-  storageKey     String
-  uploadedById   String
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id              String    @id @default(cuid())
+  organizationId  String
+  folderId        String?
+  name            String
+  mimeType        String
+  sizeBytes       Int
+  storageKey      String
+  /**
+   * Which configured storage provider (StorageService's provider map) actually holds this object — set at upload time, never changed after, so switching the platform's default provider later doesn't strand existing files.
+   */
+  storageProvider String    @default("zata")
+  uploadedById    String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
 
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   folder       Folder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
@@ -234,13 +238,17 @@ model File {
 }
 
 model FileVersion {
-  id            String   @id @default(cuid())
-  fileId        String
-  versionNumber Int
-  storageKey    String
-  sizeBytes     Int
-  createdById   String
-  createdAt     DateTime @default(now())
+  id              String   @id @default(cuid())
+  fileId          String
+  versionNumber   Int
+  storageKey      String
+  /**
+   * Same provider the parent File's current version was uploaded to — see File.storageProvider.
+   */
+  storageProvider String   @default("zata")
+  sizeBytes       Int
+  createdById     String
+  createdAt       DateTime @default(now())
 
   file      File @relation(fields: [fileId], references: [id], onDelete: Cascade)
   createdBy User @relation(fields: [createdById], references: [id])
@@ -748,10 +756,12 @@ model SsoConnection {
 /// plan assignment don't touch Razorpay at all, so they're unaffected by
 /// this on purpose — see BillingService.
 model PlatformSettings {
-  id              String   @id @default("singleton")
-  paymentsEnabled Boolean  @default(false)
-  updatedAt       DateTime @updatedAt
-  updatedById     String?
+  id                     String   @id @default("singleton")
+  paymentsEnabled        Boolean  @default(false)
+  /// Which configured storage provider (StorageService's provider map) NEW uploads go to. Switching this in the admin panel takes effect immediately — no API restart needed, unlike the ZATA_*/WASABI_* env vars that make a provider exist at all in the first place.
+  defaultStorageProvider String   @default("zata")
+  updatedAt              DateTime @updatedAt
+  updatedById            String?
 
   updatedBy AdminUser? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
 }

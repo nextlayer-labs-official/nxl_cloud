@@ -590,7 +590,7 @@ export class FoldersService {
   /**
    * Soft delete, cascading to every descendant folder and file — mirrors
    * File.remove()'s trash semantics instead of requiring an empty folder.
-   * The Wasabi objects are untouched here; permanentlyDelete is what actually
+   * The storage objects are untouched here; permanentlyDelete is what actually
    * removes them, same split as files use.
    */
   /** EDITOR-minimum (not owner-only) — matches Dropbox/Drive, where an editor on shared content can delete it; restore/permanentlyDelete/move/share stay owner-only. */
@@ -629,14 +629,14 @@ export class FoldersService {
     await this.logFolderActivity(folder, userId, "folder.restored");
   }
 
-  /** Permanently removes this trashed folder, every descendant folder, and every file under the whole subtree (Wasabi objects included). */
+  /** Permanently removes this trashed folder, every descendant folder, and every file under the whole subtree (storage objects included). */
   async permanentlyDelete(userId: string, folderId: string) {
     const folder = await this.getTrashedFolder(userId, folderId);
     const descendantIds = await this.collectDescendantFolderIds(folder.id);
     const allFolderIds = [folder.id, ...descendantIds];
 
     const filesToDelete = await prisma.file.findMany({ where: { folderId: { in: allFolderIds } } });
-    await Promise.all(filesToDelete.map((f) => this.storage.deleteObject(f.storageKey)));
+    await Promise.all(filesToDelete.map((f) => this.storage.deleteObject(f.storageProvider, f.storageKey)));
     await prisma.file.deleteMany({ where: { folderId: { in: allFolderIds } } });
     // Deleting just the root cascades to every descendant folder automatically —
     // Folder.parent has onDelete: Cascade (files don't, hence the explicit cleanup above).

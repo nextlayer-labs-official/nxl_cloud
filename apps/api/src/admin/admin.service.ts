@@ -4,7 +4,8 @@ import { hashPassword } from "../auth/password.util";
 import { sendVerificationEmailFor } from "../auth/verification-token.util";
 import { EmailService } from "../email/email.service";
 import { uniqueOrgSlug } from "../organizations/slug.util";
-import { getPlatformSettings, setPaymentsEnabled } from "../platform-settings/platform-settings.util";
+import { getPlatformSettings, setDefaultStorageProvider, setPaymentsEnabled } from "../platform-settings/platform-settings.util";
+import { StorageService } from "../storage/storage.service";
 import type { ChangePlanDto } from "./dto/change-plan.dto";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import type { CreateDistributorDto } from "./dto/create-distributor.dto";
@@ -28,7 +29,10 @@ const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly email: EmailService) {}
+  constructor(
+    private readonly email: EmailService,
+    private readonly storage: StorageService,
+  ) {}
 
   async createCustomer(dto: CreateCustomerDto) {
     const email = dto.email.toLowerCase().trim();
@@ -1035,14 +1039,32 @@ export class AdminService {
     });
   }
 
-  /** Platform-wide toggles — today just the Razorpay kill-switch (see BillingService). */
+  /** Platform-wide toggles — the Razorpay kill-switch, and which storage provider new uploads go to (see BillingService, StorageService). */
   async getSettings() {
     const settings = await getPlatformSettings();
-    return { paymentsEnabled: settings.paymentsEnabled, updatedAt: settings.updatedAt, updatedByName: settings.updatedBy?.name ?? null };
+    return {
+      paymentsEnabled: settings.paymentsEnabled,
+      defaultStorageProvider: settings.defaultStorageProvider,
+      availableStorageProviders: this.storage.getAvailableProviderIds(),
+      updatedAt: settings.updatedAt,
+      updatedByName: settings.updatedBy?.name ?? null,
+    };
   }
 
+  /** Each field is independently optional — a call only touches the setting(s) it actually includes. */
   async updateSettings(adminId: string, dto: UpdatePlatformSettingsDto) {
-    const settings = await setPaymentsEnabled(dto.paymentsEnabled, adminId);
-    return { paymentsEnabled: settings.paymentsEnabled, updatedAt: settings.updatedAt, updatedByName: settings.updatedBy?.name ?? null };
+    if (dto.paymentsEnabled !== undefined) {
+      await setPaymentsEnabled(dto.paymentsEnabled, adminId);
+    }
+    if (dto.defaultStorageProvider !== undefined) {
+      const available = this.storage.getAvailableProviderIds();
+      if (!available.includes(dto.defaultStorageProvider)) {
+        throw new BadRequestException(
+          `"${dto.defaultStorageProvider}" isn't a configured storage provider (available: ${available.join(", ")}).`,
+        );
+      }
+      await setDefaultStorageProvider(dto.defaultStorageProvider, adminId);
+    }
+    return this.getSettings();
   }
 }

@@ -268,9 +268,13 @@ export interface AdminAuditLogEntry {
   actor: { name: string; email: string } | null;
 }
 
-/** Platform-wide toggles — today just the Razorpay kill-switch (see /admin/settings). */
+/** Platform-wide toggles — the Razorpay kill-switch, and which storage provider new uploads go to (see /admin/settings). */
 export interface AdminPlatformSettings {
   paymentsEnabled: boolean;
+  /** Which configured provider new uploads go to — see StorageService. Existing files keep resolving against whatever provider they were actually uploaded to. */
+  defaultStorageProvider: string;
+  /** Every provider id actually configured right now — what the picker below should offer. */
+  availableStorageProviders: string[];
   updatedAt: string | null;
   updatedByName: string | null;
 }

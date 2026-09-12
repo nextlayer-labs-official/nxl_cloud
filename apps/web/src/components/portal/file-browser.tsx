@@ -54,7 +54,7 @@ import { useKeyboardShortcuts } from "./use-keyboard-shortcuts";
 import { ViewModeToggle, type ViewMode } from "./view-mode-toggle";
 
 const UPLOAD_FAILED_MESSAGE =
-  "Upload to storage failed. If Wasabi credentials aren't configured yet (or the bucket's CORS policy doesn't allow this origin), this is expected.";
+  "Upload to storage failed. If storage credentials aren't configured yet (or the bucket's CORS policy doesn't allow this origin), this is expected.";
 
 const VIEW_MODE_STORAGE_KEY = "nxl-file-view-mode";
 
@@ -326,9 +326,10 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
       setUploadsCollapsed(false);
       setUploads((prev) => [...prev, { id, name: file.name, mimeType, progress: 0, status: "uploading" }]);
       try {
-        const { uploadUrl, storageKey } = await api.post<{
+        const { uploadUrl, storageKey, storageProvider } = await api.post<{
           uploadUrl: string;
           storageKey: string;
+          storageProvider: string;
         }>("/files/upload-url", {
           name: file.name,
           mimeType,
@@ -356,6 +357,7 @@ export function FileBrowser({ folderId }: FileBrowserProps) {
           sizeBytes: file.size,
           folderId,
           storageKey,
+          storageProvider,
         });
 
         setUploads((prev) =>

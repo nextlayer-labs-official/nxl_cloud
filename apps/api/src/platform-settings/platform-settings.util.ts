@@ -26,3 +26,12 @@ export async function setPaymentsEnabled(enabled: boolean, adminId: string) {
     include: { updatedBy: { select: { name: true } } },
   });
 }
+
+export async function setDefaultStorageProvider(providerId: string, adminId: string) {
+  return prisma.platformSettings.upsert({
+    where: { id: SINGLETON_ID },
+    create: { id: SINGLETON_ID, defaultStorageProvider: providerId, updatedById: adminId },
+    update: { defaultStorageProvider: providerId, updatedById: adminId },
+    include: { updatedBy: { select: { name: true } } },
+  });
+}

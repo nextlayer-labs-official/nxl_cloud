@@ -31,6 +31,19 @@ export function SettingsView() {
     }
   }
 
+  async function handleProviderChange(defaultStorageProvider: string) {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api.patch<AdminPlatformSettings>("/admin/settings", { defaultStorageProvider });
+      setSettings(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't update settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div>
       <div className="mb-8">
@@ -64,6 +77,32 @@ export function SettingsView() {
             onCheckedChange={handleToggle}
             aria-label="Payments enabled"
           />
+        </div>
+      )}
+
+      {settings && (
+        <div className="border-border-subtle mt-6 flex items-start justify-between gap-6 rounded-xl border p-5">
+          <div>
+            <div className="text-foreground text-[14px] font-semibold">Default storage provider</div>
+            <p className="text-ink-450 mt-1 max-w-md text-[13px]">
+              Which provider new uploads go to. Takes effect immediately, no restart — existing files keep
+              downloading from whichever provider they were actually uploaded to, so switching this never strands
+              anything already stored.
+            </p>
+          </div>
+          <select
+            value={settings.defaultStorageProvider}
+            disabled={saving}
+            onChange={(e) => handleProviderChange(e.target.value)}
+            aria-label="Default storage provider"
+            className="border-border-subtle text-foreground h-8 rounded-lg border bg-transparent px-2.5 text-[13px] outline-none disabled:opacity-50"
+          >
+            {settings.availableStorageProviders.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
         </div>
       )}
     </div>

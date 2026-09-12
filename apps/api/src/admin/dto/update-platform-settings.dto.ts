@@ -1,6 +1,11 @@
-import { IsBoolean } from "class-validator";
+import { IsBoolean, IsOptional, IsString } from "class-validator";
 
 export class UpdatePlatformSettingsDto {
+  @IsOptional()
   @IsBoolean()
-  paymentsEnabled!: boolean;
+  paymentsEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  defaultStorageProvider?: string;
 }

@@ -17,4 +17,7 @@ export class ConfirmUploadDto {
 
   @IsNotEmpty()
   storageKey!: string;
+
+  @IsNotEmpty()
+  storageProvider!: string;
 }

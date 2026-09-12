@@ -191,7 +191,7 @@ export class AuthService {
    * Personal workspace = one user per org, so deleting the account deletes the
    * whole workspace. Order matters: collect storage keys and delete the
    * Organization (which cascades Folder/File/FileVersion/etc. in the DB) before
-   * removing the Wasabi objects, then delete the User row last — by that point
+   * removing the storage objects, then delete the User row last — by that point
    * nothing non-cascading (Folder.createdBy, File.uploadedBy, ...) still
    * references it, since those rows were org-scoped and are already gone.
    */
@@ -204,11 +204,11 @@ export class AuthService {
     const membership = await this.organizations.getPrimaryMembership(userId);
     const files = await prisma.file.findMany({
       where: { organizationId: membership.organizationId },
-      select: { storageKey: true },
+      select: { storageKey: true, storageProvider: true },
     });
 
     await prisma.organization.delete({ where: { id: membership.organizationId } });
-    await Promise.all(files.map((f) => this.storage.deleteObject(f.storageKey)));
+    await Promise.all(files.map((f) => this.storage.deleteObject(f.storageProvider, f.storageKey)));
     await prisma.user.delete({ where: { id: userId } });
   }
 

@@ -9,7 +9,7 @@ likely to hit.
 
 | File | Read by | Contains | After editing |
 |---|---|---|---|
-| `.env` (repo root) | `apps/api` (backend), at process startup | `DATABASE_URL`, `WEB_ORIGIN`, Wasabi, Razorpay, SMTP | `pm2 restart nxl-api` |
+| `.env` (repo root) | `apps/api` (backend), at process startup | `DATABASE_URL`, `WEB_ORIGIN`, Zata/Wasabi, Razorpay, SMTP | `pm2 restart nxl-api` |
 | `apps/web/.env.local` | `apps/web` (frontend), baked in at build time | `NEXT_PUBLIC_API_URL` | `npm run build:web` **then** `pm2 restart nxl-web` |
 
 Editing the wrong one, or forgetting the rebuild step for the web one, is
@@ -65,9 +65,9 @@ Set:
   address browsers will load the site from, port included. This also
   controls CORS on the API, so it must match exactly.
 
-Wasabi / Razorpay / SMTP are optional for staging — the app boots and
-degrades gracefully without them:
-- No Wasabi → file metadata works, but upload/download URLs won't resolve.
+Zata (or Wasabi) / Razorpay / SMTP are optional for staging — the app boots
+and degrades gracefully without them:
+- No storage provider configured → file metadata works, but upload/download URLs won't resolve.
 - No Razorpay → `GET /billing/plans` works, checkout returns a clean 503.
 - No SMTP → registration/reset/invite emails are skipped and logged instead
   of sent, so those flows won't be end-to-end testable for real users. Use
@@ -82,7 +82,7 @@ pm2 logs nxl-api --lines 30
 This file is read fresh at process startup (unlike `apps/web/.env.local`
 below, which gets compiled into the browser bundle and needs a full
 rebuild). Test each one actually works after restarting: upload a file
-(Wasabi), run checkout on `/portal/settings` (Razorpay), and register or
+(storage provider), run checkout on `/portal/settings` (Razorpay), and register or
 hit "Resend verification" (SMTP) — check the email actually arrives.
 
 ## 5. Web app's own env — the #1 source of confusing errors

@@ -31,7 +31,7 @@ export class ShareService {
     }
 
     const downloadUrl = allowDownload
-      ? await this.storage.getDownloadUrl(file.storageKey, file.name)
+      ? await this.storage.getDownloadUrl(file.storageProvider, file.storageKey, file.name)
       : null;
 
     return {
@@ -64,7 +64,7 @@ export class ShareService {
         name: file.name,
         sizeBytes: file.sizeBytes,
         mimeType: file.mimeType,
-        downloadUrl: await this.storage.getDownloadUrl(file.storageKey, file.name),
+        downloadUrl: await this.storage.getDownloadUrl(file.storageProvider, file.storageKey, file.name),
       })),
     );
 
