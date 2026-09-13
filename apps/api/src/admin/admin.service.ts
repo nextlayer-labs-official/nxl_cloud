@@ -292,13 +292,55 @@ export class AdminService {
     return map;
   }
 
+  /**
+   * A customer's plan changes get paid for in one of two completely
+   * separate tables depending on how they're billed — a self-serve
+   * Razorpay charge writes a `Payment` row, but a partner-managed
+   * activation/upgrade debits the *partner's* wallet instead
+   * (`PartnerService.debitWallet`) and never touches `Payment` at all.
+   * Admins looking at one customer's billing history need both merged
+   * into one timeline, not just the Razorpay half of it.
+   */
   async getOrganizationTransactions(id: string) {
     await this.requireOrganization(id);
-    return prisma.payment.findMany({
-      where: { organizationId: id },
-      include: { plan: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const [payments, partnerDebits] = await Promise.all([
+      prisma.payment.findMany({
+        where: { organizationId: id },
+        include: { plan: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+      // organizationId is only ever set on a DEBIT row tied to this specific
+      // customer's plan change — a partner's own wallet top-up (CREDIT) never
+      // has one, so no extra type filter is needed here.
+      prisma.partnerWalletTransaction.findMany({
+        where: { organizationId: id },
+        include: { plan: { select: { name: true } }, partner: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    const fromPayments = payments.map((p) => ({
+      id: p.id,
+      source: "razorpay" as const,
+      amountCents: p.amountCents,
+      billingCycle: p.billingCycle,
+      planName: p.plan.name,
+      partnerName: null,
+      createdAt: p.createdAt,
+    }));
+    const fromPartnerWallet = partnerDebits.map((d) => ({
+      id: d.id,
+      source: "partner_wallet" as const,
+      amountCents: d.amountCents,
+      billingCycle: null,
+      planName: d.plan?.name ?? null,
+      partnerName: d.partner.name,
+      createdAt: d.createdAt,
+    }));
+
+    return [...fromPayments, ...fromPartnerWallet].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+    );
   }
 
   async suspendOrganization(id: string, adminUser: AdminActor) {

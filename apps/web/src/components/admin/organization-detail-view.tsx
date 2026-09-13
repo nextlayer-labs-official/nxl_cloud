@@ -401,9 +401,16 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
                 {transactions.map((tx) => (
                   <div key={tx.id} className="flex items-center justify-between text-[13px]">
                     <div>
-                      <div className="text-foreground font-medium">{tx.plan.name}</div>
+                      <div className="text-foreground font-medium">{tx.planName ?? "—"}</div>
                       <div className="text-ink-450">
-                        {formatDate(tx.createdAt)} · {tx.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}
+                        {formatDate(tx.createdAt)}
+                        {tx.billingCycle && ` · ${tx.billingCycle === "ANNUAL" ? "Annual" : "Monthly"}`}
+                        {" · "}
+                        {tx.source === "razorpay" ? (
+                          "via Razorpay"
+                        ) : (
+                          <>via {tx.partnerName}&apos;s wallet</>
+                        )}
                       </div>
                     </div>
                     <div className="text-foreground font-semibold">₹{(tx.amountCents / 100).toFixed(2)}</div>

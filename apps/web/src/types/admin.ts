@@ -84,13 +84,16 @@ export interface AdminOrganizationDetail {
   } | null;
 }
 
+/** A customer's plan changes are billed one of two ways — a self-serve Razorpay charge, or a debit against the managing partner's own wallet — merged into one timeline by AdminService.getOrganizationTransactions. */
 export interface AdminTransaction {
   id: string;
+  source: "razorpay" | "partner_wallet";
   amountCents: number;
-  currency: string;
-  billingCycle: "MONTHLY" | "ANNUAL";
+  billingCycle: "MONTHLY" | "ANNUAL" | null;
+  planName: string | null;
+  /** Set only for source "partner_wallet" — which partner's wallet this actually debited. */
+  partnerName: string | null;
   createdAt: string;
-  plan: { name: string };
 }
 
 export interface AdminPlan {
