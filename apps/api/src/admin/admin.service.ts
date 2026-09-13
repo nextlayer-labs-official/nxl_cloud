@@ -327,6 +327,66 @@ export class AdminService {
     return updated;
   }
 
+  /**
+   * Irreversible: the organization, every member whose ONLY membership is
+   * this org (mirrors AuthService.deleteAccount's self-service flow — the
+   * schema allows a user to belong to multiple orgs even though nothing in
+   * the product creates that today, so a member with another membership
+   * elsewhere just loses this one, not their whole account), and every
+   * storage object the org's files (and file *versions* — deleteAccount's
+   * flow misses these) ever pointed at, across whichever provider each one
+   * actually lives in.
+   *
+   * DB rows go first (Prisma's cascades handle Folder/File/FileVersion/
+   * Membership/Subscription/Payment/etc. — AuditLog only gets its
+   * organizationId nulled, not deleted, so history survives); storage
+   * cleanup happens last and is best-effort, same as everywhere else
+   * StorageService.deleteObject is used.
+   */
+  async deleteOrganization(id: string, adminUser: AdminActor) {
+    const org = await this.requireOrganization(id);
+
+    const [members, files, fileVersions] = await Promise.all([
+      prisma.membership.findMany({ where: { organizationId: id }, select: { userId: true } }),
+      prisma.file.findMany({ where: { organizationId: id }, select: { storageKey: true, storageProvider: true } }),
+      prisma.fileVersion.findMany({
+        where: { file: { organizationId: id } },
+        select: { storageKey: true, storageProvider: true },
+      }),
+    ]);
+
+    const soleMembershipUserIds: string[] = [];
+    for (const member of members) {
+      const membershipCount = await prisma.membership.count({ where: { userId: member.userId } });
+      if (membershipCount === 1) soleMembershipUserIds.push(member.userId);
+    }
+
+    await recordAuditLog({
+      organizationId: id,
+      action: "organization.deleted",
+      targetType: "ORGANIZATION",
+      targetId: id,
+      metadata: {
+        adminName: adminUser.name,
+        adminEmail: adminUser.email,
+        orgName: org.name,
+        memberCount: members.length,
+        deletedUserCount: soleMembershipUserIds.length,
+      },
+    });
+
+    await prisma.organization.delete({ where: { id } });
+
+    if (soleMembershipUserIds.length > 0) {
+      await prisma.user.deleteMany({ where: { id: { in: soleMembershipUserIds } } });
+    }
+
+    const objectsToDelete = [...files, ...fileVersions];
+    await Promise.all(objectsToDelete.map((f) => this.storage.deleteObject(f.storageProvider, f.storageKey)));
+
+    return { success: true, deletedUserCount: soleMembershipUserIds.length };
+  }
+
   /** Scopes the target user to this specific org, so an admin acting on one org's detail page can't accidentally touch a member of a different org via a mismatched id. */
   private async requireMember(organizationId: string, userId: string) {
     const membership = await prisma.membership.findUnique({

@@ -70,6 +70,12 @@ export class AdminController {
     return this.adminService.reactivateOrganization(id, req.adminUser!);
   }
 
+  @Delete("organizations/:id")
+  @HttpCode(HttpStatus.OK)
+  deleteOrganization(@Req() req: Request, @Param("id") id: string) {
+    return this.adminService.deleteOrganization(id, req.adminUser!);
+  }
+
   @Post("organizations/:id/members/:userId/verify-email")
   @HttpCode(HttpStatus.OK)
   markMemberVerified(@Param("id") id: string, @Param("userId") userId: string) {

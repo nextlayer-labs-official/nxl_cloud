@@ -32,6 +32,7 @@ const ACTION_LABELS: Record<string, string> = {
   "organization.created": "created the organization",
   "organization.suspended": "suspended the organization",
   "organization.reactivated": "reactivated the organization",
+  "organization.deleted": "permanently deleted the organization",
   "subscription.plan_changed": "changed the plan",
   "settings.updated": "updated platform settings",
   "member.invited": "invited a member",

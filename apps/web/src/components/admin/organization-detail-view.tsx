@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Loader2, Mail, UserCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, CheckCircle2, Loader2, Mail, Trash2, UserCheck } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,7 @@ import type {
 } from "@/types/admin";
 import { humanizeAuditAction } from "./audit-action-labels";
 import { ChangePlanModal } from "./change-plan-modal";
+import { DeleteOrganizationModal } from "./delete-organization-modal";
 import { SubscriptionOverrideModal } from "./subscription-override-modal";
 
 function formatDateTime(iso: string): string {
@@ -28,6 +30,7 @@ function formatDateTime(iso: string): string {
 type DetailTab = "overview" | "members" | "sharing" | "billing" | "activity";
 
 export function OrganizationDetailView({ orgId }: { orgId: string }) {
+  const router = useRouter();
   const [org, setOrg] = useState<AdminOrganizationDetail | null>(null);
   const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
   const [auditLog, setAuditLog] = useState<AdminAuditLogEntry[]>([]);
@@ -35,6 +38,7 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
   const [pending, setPending] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [changingPlan, setChangingPlan] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<DetailTab>("overview");
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [resentId, setResentId] = useState<string | null>(null);
@@ -152,6 +156,14 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
           >
             {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {org.suspendedAt ? "Reactivate" : "Suspend"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDeleting(true)}
+            className="border-error-border text-error-text hover:bg-error-bg flex cursor-pointer items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm font-semibold"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
           </button>
         </div>
       </div>
@@ -467,6 +479,14 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
             setOverriding(false);
             load();
           }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteOrganizationModal
+          organization={{ id: org.id, name: org.name }}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => router.push("/admin/organizations")}
         />
       )}
     </div>
