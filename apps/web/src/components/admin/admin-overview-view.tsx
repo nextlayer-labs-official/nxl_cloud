@@ -2,15 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  Building2,
-  ChevronRight,
-  HardDrive,
-  IndianRupee,
-  TrendingDown,
-  TrendingUp,
-  Users,
-} from "lucide-react";
+import { Building2, HardDrive, IndianRupee, Users } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes, formatDate, formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -18,6 +10,7 @@ import type { AdminAuditLogEntry, AdminOrganization, AdminOverview, Subscription
 import { auditActionCategory, humanizeAuditAction } from "./audit-action-labels";
 import { DonutChart, type DonutSlice } from "./donut-chart";
 import { RevenueTrendChart } from "./revenue-trend-chart";
+import { StatCard } from "./stat-card";
 
 function formatMoney(cents: number): string {
   return `₹${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
@@ -28,51 +21,6 @@ const RANGE_PRESETS = [
   { label: "Last 30 days", days: 30 },
   { label: "Last 90 days", days: 90 },
 ] as const;
-
-interface StatCardProps {
-  icon: React.ComponentType<{ className?: string }>;
-  iconClassName: string;
-  label: string;
-  value: string;
-  hint?: string;
-  deltaPercent?: number;
-  href: string;
-}
-
-function StatCard({ icon: Icon, iconClassName, label, value, hint, deltaPercent, href }: StatCardProps) {
-  const isUp = deltaPercent !== undefined && deltaPercent >= 0;
-  return (
-    <Link
-      href={href}
-      className="border-border-subtle hover:bg-surface-muted group flex flex-col gap-3 rounded-xl border p-5 transition-colors"
-    >
-      <div className="flex items-start justify-between">
-        <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", iconClassName)}>
-          <Icon className="h-4 w-4" />
-        </div>
-        <ChevronRight className="text-ink-450 h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
-      </div>
-      <div>
-        <div className="text-ink-450 text-xs font-semibold tracking-wide uppercase">{label}</div>
-        <div className="text-foreground mt-1 text-2xl font-bold tracking-[-0.02em]">{value}</div>
-        <div className="mt-1 flex items-center gap-1.5">
-          {deltaPercent !== undefined && (
-            <span
-              className={cn(
-                "flex items-center gap-0.5 text-[12px] font-semibold",
-                isUp ? "text-success" : "text-error-text",
-              )}
-            >
-              {isUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-              {Math.abs(deltaPercent)}%
-            </span>
-          )}
-          {hint && <span className="text-ink-450 text-[12px]">{hint}</span>}
-        </div>
-      </div>
-    </Link>
-  );
-}
 
 const STATUS_LABELS: Record<SubscriptionStatus, string> = {
   TRIALING: "Trialing",
