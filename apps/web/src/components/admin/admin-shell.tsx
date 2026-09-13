@@ -161,8 +161,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AdminContext.Provider value={{ adminUser: state.adminUser }}>
-      <div className="bg-background text-foreground flex min-h-screen w-full">
-        <aside className="border-border-subtle bg-background flex w-60 shrink-0 flex-col border-r px-3 py-5">
+      <div className="bg-background text-foreground flex h-screen w-full overflow-hidden">
+        <aside className="border-border-subtle bg-background flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r px-3 py-5">
           <Link href="/admin" className="text-foreground mb-6 flex items-center gap-2 px-2 text-[17px] font-bold tracking-[-0.02em]">
             Skylyer <span className="text-ink-450 font-medium">Admin</span>
           </Link>
@@ -191,7 +191,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="border-border-subtle bg-background flex h-16 shrink-0 items-center gap-4 border-b px-6">
             <button
               type="button"
@@ -223,7 +223,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-[1200px] px-6 py-10">{children}</main>
+          <main className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-[1200px] px-6 py-10">{children}</div>
+          </main>
         </div>
       </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
