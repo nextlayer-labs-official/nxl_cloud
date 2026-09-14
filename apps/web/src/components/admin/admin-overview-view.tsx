@@ -6,7 +6,7 @@ import { Building2, HardDrive, IndianRupee, Users } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes, formatDate, formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { AdminAuditLogEntry, AdminOrganization, AdminOverview, SubscriptionStatus } from "@/types/admin";
+import type { AdminAuditLogEntry, AdminAuditLogList, AdminOrganization, AdminOverview, SubscriptionStatus } from "@/types/admin";
 import { auditActionCategory, humanizeAuditAction } from "./audit-action-labels";
 import { DonutChart, type DonutSlice } from "./donut-chart";
 import { RevenueTrendChart } from "./revenue-trend-chart";
@@ -71,12 +71,12 @@ export function AdminOverviewView() {
     Promise.all([
       api.get<AdminOverview>(`/admin/overview${query}`),
       api.get<AdminOrganization[]>("/admin/organizations"),
-      api.get<AdminAuditLogEntry[]>("/admin/audit-log?take=6"),
+      api.get<AdminAuditLogList>("/admin/audit-log?take=6"),
     ])
       .then(([overviewData, orgsData, activityData]) => {
         setOverview(overviewData);
         setOrganizations(orgsData);
-        setActivity(activityData);
+        setActivity(activityData.entries);
       })
       .catch(() => setError("Couldn't load the platform overview."));
   }, [rangeDays]);

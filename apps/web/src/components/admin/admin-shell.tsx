@@ -21,7 +21,7 @@ import {
 import { api } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { AdminAuditLogEntry, AdminUser } from "@/types/admin";
+import type { AdminAuditLogEntry, AdminAuditLogList, AdminUser } from "@/types/admin";
 import { AdminContext } from "./admin-context";
 import { humanizeAuditAction } from "./audit-action-labels";
 import { CommandPalette } from "./command-palette";
@@ -59,8 +59,8 @@ function NotificationsBell() {
   useEffect(() => {
     if (!open || entries) return;
     api
-      .get<AdminAuditLogEntry[]>("/admin/audit-log?take=6")
-      .then(setEntries)
+      .get<AdminAuditLogList>("/admin/audit-log?take=6")
+      .then((res) => setEntries(res.entries))
       .catch(() => setEntries([]));
   }, [open, entries]);
 
