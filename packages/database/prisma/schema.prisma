@@ -360,6 +360,7 @@ model AuditLog {
   actor        User?         @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
+  @@index([action, createdAt])
 }
 
 /// Per-user favorites — starring is personal, not shared across an org (unlike

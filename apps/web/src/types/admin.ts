@@ -281,6 +281,13 @@ export interface AdminAuditLogEntry {
   metadata: Record<string, unknown> | null;
 }
 
+export interface AdminAuditLogList {
+  total: number;
+  page: number;
+  pageSize: number;
+  entries: AdminAuditLogEntry[];
+}
+
 /** Platform-wide toggles — the Razorpay kill-switch, and which storage provider new uploads go to (see /admin/settings). */
 export interface AdminPlatformSettings {
   paymentsEnabled: boolean;

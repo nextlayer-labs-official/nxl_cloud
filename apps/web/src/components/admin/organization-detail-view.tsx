@@ -9,10 +9,11 @@ import { formatBytes, formatCustomerCode, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   AdminAuditLogEntry,
+  AdminAuditLogList,
   AdminOrganizationDetail,
   AdminTransaction,
 } from "@/types/admin";
-import { humanizeAuditAction } from "./audit-action-labels";
+import { auditActionDetail, humanizeAuditAction } from "./audit-action-labels";
 import { ChangePlanModal } from "./change-plan-modal";
 import { DeleteOrganizationModal } from "./delete-organization-modal";
 import { SubscriptionOverrideModal } from "./subscription-override-modal";
@@ -47,12 +48,12 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
     Promise.all([
       api.get<AdminOrganizationDetail>(`/admin/organizations/${orgId}`),
       api.get<AdminTransaction[]>(`/admin/organizations/${orgId}/transactions`),
-      api.get<AdminAuditLogEntry[]>(`/admin/audit-log?organizationId=${orgId}`),
+      api.get<AdminAuditLogList>(`/admin/audit-log?organizationId=${orgId}`),
     ])
       .then(([orgData, txData, logData]) => {
         setOrg(orgData);
         setTransactions(txData);
-        setAuditLog(logData);
+        setAuditLog(logData.entries);
       })
       .catch(() => setError("Couldn't load this organization."));
   }
@@ -436,6 +437,7 @@ export function OrganizationDetailView({ orgId }: { orgId: string }) {
                       {humanizeAuditAction(entry.action)}
                     </div>
                     {entry.actor && <div className="text-ink-450">{entry.actor.email}</div>}
+                    {auditActionDetail(entry) && <div className="text-ink-450">{auditActionDetail(entry)}</div>}
                   </div>
                   <div className="text-ink-450 shrink-0">{formatDateTime(entry.createdAt)}</div>
                 </div>

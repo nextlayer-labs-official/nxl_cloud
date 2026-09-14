@@ -1,9 +1,14 @@
+import { formatBytes } from "@/lib/format";
+import type { AdminAuditLogEntry } from "@/types/admin";
+
 // Generic (not "this file"-scoped, unlike the portal's per-item info-panel.tsx
 // Activity tab) since an org's/the platform's log spans many different
 // files/folders at once. Shared between organization-detail-view.tsx and
 // audit-log-view.tsx so the two admin activity views can't drift apart.
 const ACTION_LABELS: Record<string, string> = {
   "file.uploaded": "uploaded a file",
+  "file.downloaded": "downloaded a file",
+  "file.previewed": "previewed a file",
   "file.renamed": "renamed a file",
   "file.moved": "moved a file",
   "file.trashed": "deleted a file",
@@ -49,4 +54,21 @@ export function auditActionCategory(action: string): "file" | "folder" | "organi
   if (action.startsWith("organization.") || action.startsWith("subscription.") || action.startsWith("member.")) return "organization";
   if (action.startsWith("settings.")) return "settings";
   return "other";
+}
+
+/** Every action string with a human label, for building the Audit Log page's action filter dropdown. */
+export const AUDIT_ACTIONS = Object.keys(ACTION_LABELS);
+
+/**
+ * Short "filename · size" line to show under an entry's humanized action —
+ * the metadata JSON was always written for file actions, but until now
+ * nothing ever rendered it, so admins had no way to see WHICH file was
+ * uploaded/downloaded/etc. Returns null for actions with nothing file-shaped
+ * to show (org/settings/plan actions).
+ */
+export function auditActionDetail(entry: AdminAuditLogEntry): string | null {
+  const name = entry.metadata?.name;
+  if (typeof name !== "string") return null;
+  const sizeBytes = entry.metadata?.sizeBytes;
+  return typeof sizeBytes === "number" ? `${name} · ${formatBytes(sizeBytes)}` : name;
 }

@@ -112,7 +112,12 @@ export class FilesService {
       });
       return created;
     });
-    await this.logFileActivity(file, userId, "file.uploaded", { name: file.name, sizeBytes: file.sizeBytes });
+    await this.logFileActivity(file, userId, "file.uploaded", {
+      name: file.name,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+      folderId: file.folderId,
+    });
     return file;
   }
 
@@ -160,6 +165,11 @@ export class FilesService {
   async getDownloadUrl(userId: string, fileId: string) {
     const file = await this.getAccessibleFile(userId, fileId, "VIEWER");
     const downloadUrl = await this.storage.getDownloadUrl(file.storageProvider, file.storageKey, file.name);
+    await this.logFileActivity(file, userId, "file.downloaded", {
+      name: file.name,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+    });
     return { downloadUrl };
   }
 
@@ -167,6 +177,11 @@ export class FilesService {
   async getPreviewUrl(userId: string, fileId: string) {
     const file = await this.getAccessibleFile(userId, fileId, "VIEWER");
     const previewUrl = await this.storage.getDownloadUrl(file.storageProvider, file.storageKey, file.name, true);
+    await this.logFileActivity(file, userId, "file.previewed", {
+      name: file.name,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+    });
     return { previewUrl };
   }
 

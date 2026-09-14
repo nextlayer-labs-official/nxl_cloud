@@ -120,12 +120,30 @@ export class AdminController {
   }
 
   @Get("audit-log")
-  listAuditLog(@Query("take") take?: string, @Query("organizationId") organizationId?: string) {
-    const parsed = take ? Number.parseInt(take, 10) : undefined;
-    return this.adminService.listAuditLog(
-      parsed && !Number.isNaN(parsed) ? parsed : undefined,
+  listAuditLog(
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("take") take?: string,
+    @Query("organizationId") organizationId?: string,
+    @Query("action") action?: string,
+    @Query("actor") actor?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    const parseInt_ = (v?: string) => {
+      const n = v ? Number.parseInt(v, 10) : undefined;
+      return n && !Number.isNaN(n) ? n : undefined;
+    };
+    return this.adminService.listAuditLog({
+      page: parseInt_(page),
+      // `take` is kept as an alias for `pageSize` — the per-org Activity tab passes it.
+      pageSize: parseInt_(pageSize) ?? parseInt_(take),
       organizationId,
-    );
+      action,
+      actor,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
   }
 
   @Get("users")

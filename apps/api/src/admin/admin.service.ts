@@ -993,16 +993,41 @@ export class AdminService {
     return { organizations, users, payments };
   }
 
-  async listAuditLog(take = 50, organizationId?: string) {
-    return prisma.auditLog.findMany({
-      take,
-      where: organizationId ? { organizationId } : undefined,
-      orderBy: { createdAt: "desc" },
-      include: {
-        organization: { select: { name: true, slug: true } },
-        actor: { select: { name: true, email: true } },
-      },
-    });
+  async listAuditLog(params: {
+    page?: number;
+    pageSize?: number;
+    organizationId?: string;
+    action?: string;
+    actor?: string;
+    from?: Date;
+    to?: Date;
+  }) {
+    const page = params.page ?? 1;
+    const pageSize = params.pageSize ?? 50;
+    const where = {
+      ...(params.organizationId ? { organizationId: params.organizationId } : {}),
+      ...(params.action ? { action: params.action } : {}),
+      ...(params.actor
+        ? { actor: { OR: [{ name: { contains: params.actor } }, { email: { contains: params.actor } }] } }
+        : {}),
+      ...(params.from || params.to
+        ? { createdAt: { ...(params.from ? { gte: params.from } : {}), ...(params.to ? { lte: params.to } : {}) } }
+        : {}),
+    };
+    const [total, entries] = await Promise.all([
+      prisma.auditLog.count({ where }),
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          organization: { select: { name: true, slug: true } },
+          actor: { select: { name: true, email: true } },
+        },
+      }),
+    ]);
+    return { total, page, pageSize, entries };
   }
 
   // --- Partners (resellers) ---
