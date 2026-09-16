@@ -9,8 +9,10 @@
   "scripts": {
     "dev:web": "npm run dev --workspace=@nextlayer/web",
     "dev:api": "npm run dev --workspace=@nextlayer/api",
+    "dev:desktop": "npm run dev --workspace=@nextlayer/desktop",
     "build:web": "npm run build --workspace=@nextlayer/web",
     "build:api": "npm run build --workspace=@nextlayer/api",
+    "build:desktop": "npm run build:win --workspace=@nextlayer/desktop",
     "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

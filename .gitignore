@@ -21,6 +21,10 @@ node_modules/
 # nest.js (apps/api)
 **/dist/
 
+# electron (apps/desktop)
+**/release/
+apps/desktop/native/build/
+
 # misc
 .DS_Store
 *.pem
@@ -30,6 +34,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+dev.log
 
 # env files (can opt-in for committing if needed)
 .env*
