@@ -204,4 +204,26 @@ export class ApiClient {
       body: JSON.stringify(folderId ? { ...rest, folderId } : rest),
     });
   }
+
+  /** Content-edit re-upload for an EXISTING file — same shape as requestUploadUrl, but keyed off the file's own id instead of a folderId. */
+  async requestVersionUploadUrl(
+    fileId: string,
+    mimeType: string,
+    sizeBytes: number,
+  ): Promise<{ uploadUrl: string; storageKey: string; storageProvider: string }> {
+    return this.request(`/files/${fileId}/version-upload-url`, {
+      method: "POST",
+      body: JSON.stringify({ mimeType, sizeBytes }),
+    });
+  }
+
+  async confirmVersion(
+    fileId: string,
+    params: { mimeType: string; sizeBytes: number; storageKey: string; storageProvider: string },
+  ): Promise<FileItem> {
+    return this.request<FileItem>(`/files/${fileId}/versions`, {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
 }

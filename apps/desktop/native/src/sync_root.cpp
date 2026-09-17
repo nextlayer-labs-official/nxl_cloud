@@ -101,14 +101,13 @@ bool g_connected = false;
 void ConnectSyncRoot(const std::wstring& rootPath) {
   if (g_connected) return;
 
-  // NOTIFY_RENAME/NOTIFY_DELETE deliberately NOT registered yet: live
-  // testing found the ACK_RENAME response (see fetch_data.cpp's AckRename)
-  // doesn't unblock Explorer — renaming a synced placeholder hangs the
-  // rename outright rather than just failing. That's a real regression
-  // (freezing a normal file operation), not an acceptable trade for
-  // rename/delete propagation, so it's disabled here until the correct ACK
-  // key/field is confirmed properly rather than guessed again. Killing the
-  // app process was the only way to unstick a hung rename in testing.
+  // NOTIFY_RENAME/NOTIFY_DELETE deliberately never registered: live testing
+  // found the ACK_RENAME response doesn't unblock Explorer — renaming a
+  // synced placeholder hung the rename outright rather than just failing
+  // (killing the app process was the only way to unstick it). Rename/
+  // delete/edit propagation, both directions, goes through reconcile.h's
+  // diff-and-converge pass instead — see sync-root.ts's reconciliation
+  // wiring — which never touches CF_OPERATION_TYPE_ACK_RENAME/ACK_DELETE.
   static const CF_CALLBACK_REGISTRATION callbackTable[] = {
       {CF_CALLBACK_TYPE_FETCH_DATA, OnFetchData},
       {CF_CALLBACK_TYPE_CANCEL_FETCH_DATA, OnCancelFetchData},

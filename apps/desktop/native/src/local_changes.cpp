@@ -33,6 +33,20 @@ HANDLE g_dirHandle = INVALID_HANDLE_VALUE;
 std::mutex g_pendingMutex;
 std::unordered_map<std::wstring, std::chrono::steady_clock::time_point> g_pending;
 
+// Separate from g_pending (which only tracks brand-new items for the fast
+// upload path) — this fires once, debounced, after ANY local change
+// (rename/delete/edit included) settles, so JS can run a full local
+// reconciliation pass. See sync-root.ts's "localTreeChanged" wiring.
+std::mutex g_treeChangeMutex;
+std::chrono::steady_clock::time_point g_lastTreeChangeAt;
+bool g_treeChangeArmed = false;
+
+void MarkTreeChanged() {
+  std::lock_guard<std::mutex> lock(g_treeChangeMutex);
+  g_lastTreeChangeAt = std::chrono::steady_clock::now();
+  g_treeChangeArmed = true;
+}
+
 void MarkPending(const std::wstring& path) {
   std::lock_guard<std::mutex> lock(g_pendingMutex);
   g_pending[path] = std::chrono::steady_clock::now();
@@ -88,7 +102,13 @@ void ProcessNewLocalItem(const std::wstring& path) {
   if (handle == INVALID_HANDLE_VALUE) return;
 
   USN usn = 0;
-  HRESULT hr = CfConvertToPlaceholder(handle, nullptr, 0, CF_CONVERT_FLAG_NONE, &usn, nullptr);
+  // Without ENABLE_ON_DEMAND_POPULATION, a converted placeholder can never
+  // be dehydrated later (confirmed empirically: DehydrateAndRefreshPlaceholder
+  // failed with ERROR_CLOUD_FILE_NOT_IN_SYNC on one of these) — files that
+  // arrived via the remote-pull path (placeholders.cpp's CfCreatePlaceholders)
+  // get this implicitly, so local uploads need it explicitly to support a
+  // later remote content-edit being applied to them the same way.
+  HRESULT hr = CfConvertToPlaceholder(handle, nullptr, 0, CF_CONVERT_FLAG_ENABLE_ON_DEMAND_POPULATION, &usn, nullptr);
   if (FAILED(hr)) {
     CloseHandle(handle);
     return;
@@ -103,6 +123,21 @@ void ProcessNewLocalItem(const std::wstring& path) {
 
     CfUpdatePlaceholder(handle, nullptr, identity.c_str(), static_cast<DWORD>((identity.size() + 1) * sizeof(wchar_t)),
                          nullptr, 0, updateFlags, &usn, nullptr);
+
+    // CfUpdatePlaceholder can itself touch the file's on-disk last-write
+    // time — if JS recorded its "last synced" fingerprint from the stat()
+    // it took inside the newLocalItem bridge call (before this line ran),
+    // the very next reconciliation pass would see a mismatch and mistake
+    // this conversion's own side effect for a real content edit, re-
+    // uploading a file nobody touched. Reusing "hydrationComplete" here —
+    // its JS handler already does exactly what's needed: re-stat and
+    // correct the fingerprint now that conversion is truly finished.
+    if (!isFolder) {
+      try {
+        NativeBridge::Call("hydrationComplete", {realId});
+      } catch (...) {
+      }
+    }
   } catch (const std::exception& ex) {
     // Best-effort for this milestone (no retry/upload-failed UI yet) — left
     // converted-but-not-marked-in-sync, so the user sees it still pending
@@ -112,6 +147,43 @@ void ProcessNewLocalItem(const std::wstring& path) {
   }
 
   CloseHandle(handle);
+}
+
+/**
+ * One-shot startup catch-up: recursively walks `dirPath` top-down and runs
+ * ProcessNewLocalItem on every plain (non-placeholder) entry it finds —
+ * the same upload+convert-to-placeholder logic the live watcher's debounce
+ * path already uses, just reused here for content that was created while
+ * the app (and its watcher) wasn't running at all, so no ReadDirectoryChangesW
+ * event was ever generated for it. Processing top-down means a folder is
+ * already converted (so GetFileAttributesW sees FILE_ATTRIBUTE_REPARSE_POINT)
+ * by the time this recurses into it, satisfying ParentIsReady immediately —
+ * no retry/re-queue needed for this controlled walk.
+ */
+void ScanForNewLocalItems(const std::wstring& dirPath) {
+  WIN32_FIND_DATAW findData;
+  HANDLE findHandle = FindFirstFileW((dirPath + L"\\*").c_str(), &findData);
+  if (findHandle == INVALID_HANDLE_VALUE) return;
+
+  std::vector<std::wstring> subdirs;
+  do {
+    std::wstring name(findData.cFileName);
+    if (name == L"." || name == L"..") continue;
+
+    std::wstring fullPath = dirPath + L"\\" + name;
+    bool isDir = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    bool isReparsePoint = (findData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+
+    if (!isReparsePoint) ProcessNewLocalItem(fullPath);
+    // Recurse regardless of whether this entry needed converting — a
+    // pre-existing placeholder folder can still contain pre-existing plain
+    // files underneath it (e.g. dropped in during a previous offline run).
+    if (isDir) subdirs.push_back(fullPath);
+  } while (FindNextFileW(findHandle, &findData));
+  FindClose(findHandle);
+
+  if (!g_running.load()) return;  // App is shutting down — stop descending.
+  for (const auto& subdir : subdirs) ScanForNewLocalItems(subdir);
 }
 
 void DebounceLoop() {
@@ -136,6 +208,23 @@ void DebounceLoop() {
       if (!g_running.load()) break;
       ProcessNewLocalItem(path);
     }
+
+    bool fireTreeChanged = false;
+    {
+      std::lock_guard<std::mutex> lock(g_treeChangeMutex);
+      if (g_treeChangeArmed && std::chrono::steady_clock::now() - g_lastTreeChangeAt >= kDebounceWindow) {
+        g_treeChangeArmed = false;
+        fireTreeChanged = true;
+      }
+    }
+    if (fireTreeChanged) {
+      try {
+        NativeBridge::Call("localTreeChanged", {});
+      } catch (...) {
+        // Best-effort — the 60s remote poll and the next local change will
+        // still eventually catch whatever this run would have.
+      }
+    }
   }
 }
 
@@ -144,9 +233,12 @@ void WatcherLoop() {
 
   while (g_running.load()) {
     DWORD bytesReturned = 0;
-    BOOL ok = ReadDirectoryChangesW(g_dirHandle, buffer.data(), static_cast<DWORD>(buffer.size()),
-                                     /*bWatchSubtree=*/TRUE, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME,
-                                     &bytesReturned, nullptr, nullptr);
+    BOOL ok = ReadDirectoryChangesW(
+        g_dirHandle, buffer.data(), static_cast<DWORD>(buffer.size()),
+        /*bWatchSubtree=*/TRUE,
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE |
+            FILE_NOTIFY_CHANGE_SIZE,
+        &bytesReturned, nullptr, nullptr);
     if (!ok || bytesReturned == 0) {
       if (!g_running.load()) break;
       continue;  // Handle closed (shutdown) or a transient buffer overflow — just keep watching.
@@ -160,6 +252,10 @@ void WatcherLoop() {
       if (info->Action == FILE_ACTION_ADDED || info->Action == FILE_ACTION_RENAMED_NEW_NAME) {
         MarkPending(g_rootPath + L"\\" + relativeName);
       }
+      // Every action (including the ones the fast path above doesn't
+      // handle — removed, renamed-from, modified) also arms the broader
+      // reconciliation trigger; see MarkTreeChanged's comment.
+      MarkTreeChanged();
 
       if (info->NextEntryOffset == 0) break;
       offset += info->NextEntryOffset;
@@ -181,6 +277,14 @@ void StartWatchingLocalChanges(const std::wstring& rootPath) {
 
   g_rootPath = rootPath;
   g_running.store(true);
+
+  // Catch up on anything created while the app wasn't running at all —
+  // ReadDirectoryChangesW (started just below) only reports events from
+  // this point forward, so it can never see a backlog. One-shot, detached:
+  // it runs to completion (or the app quits) on its own, independent of
+  // the ongoing watcher/debounce threads.
+  std::thread(ScanForNewLocalItems, rootPath).detach();
+
   g_watcherThread = std::thread(WatcherLoop);
   g_debounceThread = std::thread(DebounceLoop);
 }
@@ -197,8 +301,14 @@ void StopWatchingLocalChanges() {
   if (g_watcherThread.joinable()) g_watcherThread.join();
   if (g_debounceThread.joinable()) g_debounceThread.join();
 
-  std::lock_guard<std::mutex> lock(g_pendingMutex);
-  g_pending.clear();
+  {
+    std::lock_guard<std::mutex> lock(g_pendingMutex);
+    g_pending.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_treeChangeMutex);
+    g_treeChangeArmed = false;
+  }
 }
 
 }  // namespace skylyer

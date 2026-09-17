@@ -25,10 +25,12 @@ import {
 import { activeStarResourceIds, addStar, removeStar } from "../star/star.util";
 import { StorageService } from "../storage/storage.service";
 import type { ConfirmUploadDto } from "./dto/confirm-upload.dto";
+import type { ConfirmVersionDto } from "./dto/confirm-version.dto";
 import type { MoveFileDto } from "./dto/move-file.dto";
 import type { RenameFileDto } from "./dto/rename-file.dto";
 import type { RequestAccessDto } from "./dto/request-access.dto";
 import type { RequestUploadUrlDto } from "./dto/request-upload-url.dto";
+import type { RequestVersionUploadUrlDto } from "./dto/request-version-upload-url.dto";
 import type { ResolveAccessRequestDto } from "./dto/resolve-access-request.dto";
 import type { ShareWithUserDto } from "./dto/share-with-user.dto";
 
@@ -119,6 +121,59 @@ export class FilesService {
       folderId: file.folderId,
     });
     return file;
+  }
+
+  /**
+   * Presigns a slot for new content for an EXISTING file (desktop sync's
+   * content-edit re-upload). Unlike requestUploadUrl/confirmUpload, the org
+   * is resolved from the file's own record, not a folderId in the body, and
+   * the quota check uses the size delta since the file's current bytes are
+   * already counted in getUsedBytes.
+   */
+  async requestVersionUploadUrl(userId: string, fileId: string, dto: RequestVersionUploadUrlDto) {
+    const file = await this.getAccessibleFile(userId, fileId, "EDITOR");
+    await this.organizations.assertWithinQuota(file.organizationId, dto.sizeBytes - file.sizeBytes);
+
+    const org = await prisma.organization.findUnique({ where: { id: file.organizationId } });
+    if (!org) throw new NotFoundException("File not found.");
+    const storageKey = this.storage.buildKey(org.slug, file.name);
+    const { uploadUrl, storageProvider } = await this.storage.getUploadUrl(storageKey, dto.mimeType);
+
+    return { uploadUrl, storageKey, storageProvider };
+  }
+
+  /** Finalizes a content-edit re-upload: a new FileVersion row, and the File row's current content pointer bumped to it. Old versions' storage objects are kept, matching how replace-on-upload already leaves prior versions alone. */
+  async addVersion(userId: string, fileId: string, dto: ConfirmVersionDto) {
+    const file = await this.getAccessibleFile(userId, fileId, "EDITOR");
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const latest = await tx.fileVersion.findFirst({ where: { fileId: file.id }, orderBy: { versionNumber: "desc" } });
+      await tx.fileVersion.create({
+        data: {
+          fileId: file.id,
+          versionNumber: (latest?.versionNumber ?? 0) + 1,
+          storageKey: dto.storageKey,
+          storageProvider: dto.storageProvider,
+          sizeBytes: dto.sizeBytes,
+          createdById: userId,
+        },
+      });
+      return tx.file.update({
+        where: { id: file.id },
+        data: {
+          mimeType: dto.mimeType,
+          sizeBytes: dto.sizeBytes,
+          storageKey: dto.storageKey,
+          storageProvider: dto.storageProvider,
+        },
+      });
+    });
+    await this.logFileActivity(file, userId, "file.content_updated", {
+      name: file.name,
+      sizeBytes: dto.sizeBytes,
+      mimeType: dto.mimeType,
+    });
+    return updated;
   }
 
   private async logFileActivity(file: { organizationId: string; id: string }, actorId: string, action: string, metadata?: Record<string, unknown>) {

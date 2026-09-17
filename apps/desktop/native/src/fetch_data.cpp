@@ -187,6 +187,34 @@ void CALLBACK OnFetchData(const CF_CALLBACK_INFO* info, const CF_CALLBACK_PARAME
 
   if (failed || offset < requiredOffset + requiredLength) {
     ReportFailure(info, offset, requiredOffset + requiredLength - offset);
+    return;
+  }
+
+  // Tell JS this file's on-disk bytes now match the server so the next
+  // local reconciliation pass doesn't mistake the hydration write itself
+  // for a user edit and try to re-upload it as a new version — see
+  // reconcile.h's "hydrationComplete" wiring in sync-root.ts. Best-effort:
+  // the file is already fully hydrated and usable either way.
+  try {
+    NativeBridge::Call("hydrationComplete", {ToUtf8(fileId)});
+  } catch (...) {
+  }
+
+  // Best-effort: clear any "out of sync" state a prior remote-edit
+  // dehydrate (reconcile.cpp's DehydrateAndRefreshPlaceholder) may have
+  // set, now that fresh content has actually been fetched. Cosmetic
+  // (Explorer's sync-pending overlay), not required for correctness — the
+  // content itself is already right either way. CF_CALLBACK_INFO doesn't
+  // hand back a usable HANDLE, so this opens its own short-lived one.
+  if (info->NormalizedPath) {
+    HANDLE fileHandle = CreateFileW(info->NormalizedPath, GENERIC_READ,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                     FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (fileHandle != INVALID_HANDLE_VALUE) {
+      USN usn = 0;
+      CfUpdatePlaceholder(fileHandle, nullptr, nullptr, 0, nullptr, 0, CF_UPDATE_FLAG_MARK_IN_SYNC, &usn, nullptr);
+      CloseHandle(fileHandle);
+    }
   }
 }
 
@@ -196,75 +224,6 @@ void CALLBACK OnCancelFetchData(const CF_CALLBACK_INFO* info, const CF_CALLBACK_
   std::lock_guard<std::mutex> lock(g_cancelMutex);
   auto it = g_cancelFlags.find(identity.id);
   if (it != g_cancelFlags.end()) it->second->store(true);
-}
-
-namespace {
-
-void AckRename(const CF_CALLBACK_INFO* info) {
-  CF_OPERATION_INFO opInfo{};
-  opInfo.StructSize = sizeof(opInfo);
-  opInfo.Type = CF_OPERATION_TYPE_ACK_RENAME;
-  opInfo.ConnectionKey = info->ConnectionKey;
-  opInfo.RequestKey = info->RequestKey;
-
-  CF_OPERATION_PARAMETERS opParams{};
-  opParams.ParamSize = sizeof(opParams);
-  opParams.AckRename.Flags = CF_OPERATION_ACK_RENAME_FLAG_NONE;
-  opParams.AckRename.CompletionStatus = kStatusSuccess;  // Always allow — nothing here gates a rename.
-
-  CfExecute(&opInfo, &opParams);
-}
-
-void AckDelete(const CF_CALLBACK_INFO* info) {
-  CF_OPERATION_INFO opInfo{};
-  opInfo.StructSize = sizeof(opInfo);
-  opInfo.Type = CF_OPERATION_TYPE_ACK_DELETE;
-  opInfo.ConnectionKey = info->ConnectionKey;
-  opInfo.RequestKey = info->RequestKey;
-
-  CF_OPERATION_PARAMETERS opParams{};
-  opParams.ParamSize = sizeof(opParams);
-  opParams.AckDelete.Flags = CF_OPERATION_ACK_DELETE_FLAG_NONE;
-  opParams.AckDelete.CompletionStatus = kStatusSuccess;  // Always allow.
-
-  CfExecute(&opInfo, &opParams);
-}
-
-}  // namespace
-
-void CALLBACK OnNotifyRename(const CF_CALLBACK_INFO* info, const CF_CALLBACK_PARAMETERS* /*params*/) {
-  AckRename(info);
-}
-
-void CALLBACK OnNotifyDelete(const CF_CALLBACK_INFO* info, const CF_CALLBACK_PARAMETERS* /*params*/) {
-  AckDelete(info);
-}
-
-void CALLBACK OnNotifyRenameCompletion(const CF_CALLBACK_INFO* info, const CF_CALLBACK_PARAMETERS* params) {
-  ParsedFileIdentity identity = ParseCallbackIdentity(info);
-  if (!identity.valid) return;
-
-  std::wstring oldPath = params->RenameCompletion.SourcePath ? params->RenameCompletion.SourcePath : L"";
-  std::wstring newPath = info->NormalizedPath ? info->NormalizedPath : L"";
-  if (newPath.empty()) return;
-
-  try {
-    NativeBridge::Call("renameOrMove", {identity.isFolder ? "folder" : "file", ToUtf8(identity.id), ToUtf8(oldPath),
-                                         ToUtf8(newPath)});
-  } catch (...) {
-    // Best-effort — Explorer already committed the rename either way, and
-    // there's no user-facing ack left to send at this point.
-  }
-}
-
-void CALLBACK OnNotifyDeleteCompletion(const CF_CALLBACK_INFO* info, const CF_CALLBACK_PARAMETERS* /*params*/) {
-  ParsedFileIdentity identity = ParseCallbackIdentity(info);
-  if (!identity.valid) return;
-
-  try {
-    NativeBridge::Call("trash", {identity.isFolder ? "folder" : "file", ToUtf8(identity.id)});
-  } catch (...) {
-  }
 }
 
 }  // namespace skylyer

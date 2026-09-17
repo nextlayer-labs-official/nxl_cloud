@@ -7,6 +7,7 @@ import type { AdminAuditLogEntry } from "@/types/admin";
 // audit-log-view.tsx so the two admin activity views can't drift apart.
 const ACTION_LABELS: Record<string, string> = {
   "file.uploaded": "uploaded a file",
+  "file.content_updated": "updated a file's content",
   "file.downloaded": "downloaded a file",
   "file.previewed": "previewed a file",
   "file.renamed": "renamed a file",

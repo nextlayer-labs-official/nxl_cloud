@@ -70,6 +70,7 @@ interface ActivityEntry {
 
 const ACTION_LABELS: Record<string, string> = {
   "file.uploaded": "uploaded this file",
+  "file.content_updated": "updated this file's content",
   "file.renamed": "renamed this file",
   "file.moved": "moved this file",
   "file.trashed": "deleted this file",

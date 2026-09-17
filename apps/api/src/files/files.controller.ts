@@ -3,10 +3,12 @@ import type { Request } from "express";
 import { EmailVerifiedGuard } from "../auth/guards/email-verified.guard";
 import { SessionGuard } from "../auth/guards/session.guard";
 import { ConfirmUploadDto } from "./dto/confirm-upload.dto";
+import { ConfirmVersionDto } from "./dto/confirm-version.dto";
 import { MoveFileDto } from "./dto/move-file.dto";
 import { RenameFileDto } from "./dto/rename-file.dto";
 import { RequestAccessDto } from "./dto/request-access.dto";
 import { RequestUploadUrlDto } from "./dto/request-upload-url.dto";
+import { RequestVersionUploadUrlDto } from "./dto/request-version-upload-url.dto";
 import { ResolveAccessRequestDto } from "./dto/resolve-access-request.dto";
 import { ShareWithUserDto } from "./dto/share-with-user.dto";
 import { UpdatePermissionDto } from "./dto/update-permission.dto";
@@ -27,6 +29,18 @@ export class FilesController {
   @UseGuards(EmailVerifiedGuard)
   confirmUpload(@Req() req: Request, @Body() dto: ConfirmUploadDto) {
     return this.filesService.confirmUpload(req.user!.id, dto);
+  }
+
+  @Post(":id/version-upload-url")
+  @UseGuards(EmailVerifiedGuard)
+  requestVersionUploadUrl(@Req() req: Request, @Param("id") id: string, @Body() dto: RequestVersionUploadUrlDto) {
+    return this.filesService.requestVersionUploadUrl(req.user!.id, id, dto);
+  }
+
+  @Post(":id/versions")
+  @UseGuards(EmailVerifiedGuard)
+  addVersion(@Req() req: Request, @Param("id") id: string, @Body() dto: ConfirmVersionDto) {
+    return this.filesService.addVersion(req.user!.id, id, dto);
   }
 
   @Get("trash")

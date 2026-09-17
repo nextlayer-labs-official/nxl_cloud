@@ -17,7 +17,7 @@ void UnregisterSyncRoot(const std::wstring& syncRootId);
 
 // Connects the FETCH_DATA/CANCEL_FETCH_DATA callback table to `rootPath` so
 // opening a placeholder actually triggers a hydration fetch. Must be called
-// after RegisterSyncRoot and after FetchUrlBridge::SetProvider.
+// after RegisterSyncRoot and after NativeBridge::SetProvider.
 void ConnectSyncRoot(const std::wstring& rootPath);
 
 // Reverses ConnectSyncRoot. Safe to call even if not currently connected.

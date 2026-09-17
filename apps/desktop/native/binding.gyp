@@ -8,7 +8,9 @@
         "src/placeholders.cpp",
         "src/fetch_data.cpp",
         "src/fetch_bridge.cpp",
-        "src/local_changes.cpp"
+        "src/local_changes.cpp",
+        "src/placeholder_info.cpp",
+        "src/reconcile.cpp"
       ],
       "include_dirs": ["<!@(node -p \"require('node-addon-api').include\")"],
       "defines": ["NAPI_VERSION=8"],

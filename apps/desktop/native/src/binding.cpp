@@ -6,6 +6,8 @@
 #include "fetch_bridge.h"
 #include "local_changes.h"
 #include "placeholders.h"
+#include "reconcile.h"
+#include "string_util.h"
 #include "sync_root.h"
 
 namespace {
@@ -157,6 +159,95 @@ Napi::Value StopWatchingLocalChanges(const Napi::CallbackInfo& info) {
   return info.Env().Undefined();
 }
 
+Napi::Value ReadLocalPlaceholderTree(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "readLocalPlaceholderTree(rootPath) expects one string").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  std::vector<skylyer::LocalPlaceholderEntry> entries;
+  try {
+    entries = skylyer::ReadLocalPlaceholderTree(ToWString(info[0]));
+  } catch (const std::exception& ex) {
+    Napi::Error::New(env, ex.what()).ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  Napi::Array result = Napi::Array::New(env, entries.size());
+  for (size_t i = 0; i < entries.size(); i++) {
+    const auto& entry = entries[i];
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("path", Napi::String::New(env, skylyer::ToUtf8(entry.path)));
+    obj.Set("id", Napi::String::New(env, skylyer::ToUtf8(entry.id)));
+    obj.Set("isFolder", Napi::Boolean::New(env, entry.isFolder));
+    obj.Set("sizeBytes", Napi::Number::New(env, static_cast<double>(entry.sizeBytes)));
+    obj.Set("lastWriteTimeUnixMs", Napi::Number::New(env, static_cast<double>(entry.lastWriteTimeUnixMs)));
+    result.Set(static_cast<uint32_t>(i), obj);
+  }
+  return result;
+}
+
+Napi::Value RenameLocalPath(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsString()) {
+    Napi::TypeError::New(env, "renameLocalPath(oldPath, newPath) expects two strings").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  try {
+    skylyer::RenameLocalPath(ToWString(info[0]), ToWString(info[1]));
+  } catch (const std::exception& ex) {
+    Napi::Error::New(env, ex.what()).ThrowAsJavaScriptException();
+  }
+  return env.Undefined();
+}
+
+Napi::Value DeleteLocalPath(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsBoolean()) {
+    Napi::TypeError::New(env, "deleteLocalPath(path, isFolder) expects a string and a boolean")
+        .ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  try {
+    skylyer::DeleteLocalPath(ToWString(info[0]), info[1].As<Napi::Boolean>().Value());
+  } catch (const std::exception& ex) {
+    Napi::Error::New(env, ex.what()).ThrowAsJavaScriptException();
+  }
+  return env.Undefined();
+}
+
+Napi::Value MarkLocalPathInSync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "markLocalPathInSync(path) expects one string").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  try {
+    skylyer::MarkLocalPathInSync(ToWString(info[0]));
+  } catch (const std::exception& ex) {
+    Napi::Error::New(env, ex.what()).ThrowAsJavaScriptException();
+  }
+  return env.Undefined();
+}
+
+Napi::Value DehydrateAndRefreshPlaceholder(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 3 || !info[0].IsString() || !info[1].IsNumber() || !info[2].IsNumber()) {
+    Napi::TypeError::New(env, "dehydrateAndRefreshPlaceholder(path, sizeBytes, updatedAtUnixMs) expects a string and two numbers")
+        .ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  try {
+    skylyer::DehydrateAndRefreshPlaceholder(ToWString(info[0]),
+                                             static_cast<uint64_t>(info[1].As<Napi::Number>().Int64Value()),
+                                             info[2].As<Napi::Number>().Int64Value());
+  } catch (const std::exception& ex) {
+    Napi::Error::New(env, ex.what()).ThrowAsJavaScriptException();
+  }
+  return env.Undefined();
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("registerSyncRoot", Napi::Function::New(env, RegisterSyncRoot));
   exports.Set("unregisterSyncRoot", Napi::Function::New(env, UnregisterSyncRoot));
@@ -168,6 +259,11 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("rejectBridgeCall", Napi::Function::New(env, RejectBridgeCall));
   exports.Set("startWatchingLocalChanges", Napi::Function::New(env, StartWatchingLocalChanges));
   exports.Set("stopWatchingLocalChanges", Napi::Function::New(env, StopWatchingLocalChanges));
+  exports.Set("readLocalPlaceholderTree", Napi::Function::New(env, ReadLocalPlaceholderTree));
+  exports.Set("renameLocalPath", Napi::Function::New(env, RenameLocalPath));
+  exports.Set("deleteLocalPath", Napi::Function::New(env, DeleteLocalPath));
+  exports.Set("dehydrateAndRefreshPlaceholder", Napi::Function::New(env, DehydrateAndRefreshPlaceholder));
+  exports.Set("markLocalPathInSync", Napi::Function::New(env, MarkLocalPathInSync));
   return exports;
 }
 
