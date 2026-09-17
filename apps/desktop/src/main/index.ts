@@ -1,3 +1,4 @@
+import "./load-env";
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";

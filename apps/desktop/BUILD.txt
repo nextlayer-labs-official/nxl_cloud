@@ -1,0 +1,54 @@
+HOW TO BUILD THE SKYLYER WINDOWS INSTALLER (.exe)
+====================================================
+
+1) Set the API URL
+-------------------
+Open apps/desktop/.env and set:
+
+    SKYLYER_API_URL=https://your-api-domain.com
+
+(this file already exists locally and is not committed to git — it ships
+inside the installed app at resources/.env, so the URL can also be changed
+later by editing that file and relaunching Skylyer, without rebuilding)
+
+2) One-time machine setup (only needed once per computer)
+-----------------------------------------------------------
+Building the native Explorer-integration addon needs:
+  - Visual Studio Build Tools 2022, "Desktop development with C++" workload
+  - Windows 11 SDK (included in the above workload)
+  - Python 3.12 (required by node-gyp)
+
+Then, in every new terminal before building, tell node-gyp which Python to use:
+
+    export PYTHON="/c/Users/Lenovo/AppData/Local/Programs/Python/Python312/python.exe"
+
+(PowerShell equivalent: $env:PYTHON = "C:\Users\Lenovo\AppData\Local\Programs\Python\Python312\python.exe")
+
+3) Install dependencies (from the repo root, D:\nxl_cloud)
+-------------------------------------------------------------
+    npm install
+
+This also compiles the native addon (apps/desktop/native) via its own
+node-gyp rebuild step. Re-run this whenever native/src/*.cpp or *.h changes.
+
+4) Build the installer (from the repo root)
+-----------------------------------------------
+    npm run build:desktop
+
+This runs electron-vite build + electron-builder for Windows. The finished
+installer is written to:
+
+    apps/desktop/release/Skylyer Setup <version>.exe
+
+5) Install and test
+------------------------
+Run the .exe from apps/desktop/release/, sign in, and confirm the Skylyer
+entry appears in File Explorer's sidebar.
+
+Notes
+-----
+- To ship a build pointed at a different API URL (e.g. staging vs.
+  production), edit apps/desktop/.env before step 4 and rebuild.
+- `npm run dev:desktop` (from the repo root) runs the app in dev mode against
+  whatever SKYLYER_API_URL is set in apps/desktop/.env, without packaging
+  an installer.
