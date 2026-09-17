@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Provider.h>
@@ -60,6 +61,28 @@ void RegisterSyncRoot(const std::wstring& rootPath, const std::wstring& syncRoot
   EnsureApartmentInitialized();
 
   try {
+    // Windows only allows one sync-root registration per local folder path
+    // at a time. A past registration for this same path that was never
+    // unregistered (a different account's id from an earlier login, or a
+    // leftover from a previous install/uninstall cycle) makes the Register
+    // call below fail with ERROR_ACCESS_DENIED (0x80070005) — confirmed via
+    // a real repro — and that failure was previously silent to the user
+    // (login proceeds normally; only the Explorer entry silently never
+    // appears). Proactively clearing out any of our OWN prior registrations
+    // first avoids this and self-heals cruft accumulated across sessions.
+    auto currentRoots = StorageProviderSyncRootManager::GetCurrentSyncRoots();
+    for (const auto& existing : currentRoots) {
+      std::wstring existingId(existing.Id().c_str());
+      if (existingId.rfind(L"Skylyer!", 0) == 0) {
+        try {
+          StorageProviderSyncRootManager::Unregister(existingId);
+        } catch (const hresult_error&) {
+          // Best-effort — if this particular stale entry can't be cleared,
+          // the Register() call below will surface a clear failure anyway.
+        }
+      }
+    }
+
     StorageFolder folder = StorageFolder::GetFolderFromPathAsync(rootPath).get();
 
     StorageProviderSyncRootInfo info;

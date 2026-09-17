@@ -261,6 +261,18 @@ void WatcherLoop() {
       offset += info->NextEntryOffset;
     }
   }
+
+  // The thread that opened a handle is the one that should close it —
+  // closing it from a DIFFERENT thread (as StopWatchingLocalChanges used
+  // to) can itself block until this thread's pending synchronous
+  // ReadDirectoryChangesW call actually completes, which is exactly what
+  // caused a real deadlock ("Not Responding") when this ran on the JS main
+  // thread during sign-out. CancelIoEx (called from StopWatchingLocalChanges)
+  // is what actually unblocks the read above; this just cleans up after.
+  if (g_dirHandle != INVALID_HANDLE_VALUE) {
+    CloseHandle(g_dirHandle);
+    g_dirHandle = INVALID_HANDLE_VALUE;
+  }
 }
 
 }  // namespace
@@ -294,12 +306,25 @@ void StopWatchingLocalChanges() {
   g_running.store(false);
 
   if (g_dirHandle != INVALID_HANDLE_VALUE) {
-    CloseHandle(g_dirHandle);  // Unblocks the pending ReadDirectoryChangesW call.
-    g_dirHandle = INVALID_HANDLE_VALUE;
+    // CancelIoEx (not CloseHandle) is what actually unblocks the watcher
+    // thread's pending synchronous ReadDirectoryChangesW call here —
+    // confirmed via a real repro: CloseHandle on a handle with pending I/O
+    // issued by a DIFFERENT thread can itself block until that I/O
+    // completes, which deadlocked the whole app ("Not Responding") since
+    // this runs on the JS main thread (e.g. sign-out). CancelIoEx is
+    // designed for exactly this cross-thread cancellation. The handle
+    // itself is now closed by WatcherLoop, the thread that owns it.
+    CancelIoEx(g_dirHandle, nullptr);
   }
 
-  if (g_watcherThread.joinable()) g_watcherThread.join();
-  if (g_debounceThread.joinable()) g_debounceThread.join();
+  // Detach, don't join: g_debounceThread can be mid-ProcessNewLocalItem or
+  // mid-"localTreeChanged", both of which block on NativeBridge::Call
+  // waiting for this SAME main thread's event loop to run the JS handler —
+  // joining here would deadlock for the same reason. g_running is already
+  // false, so each thread exits on its own the moment its current
+  // iteration/call finishes, with nothing left to join.
+  if (g_watcherThread.joinable()) g_watcherThread.detach();
+  if (g_debounceThread.joinable()) g_debounceThread.detach();
 
   {
     std::lock_guard<std::mutex> lock(g_pendingMutex);
