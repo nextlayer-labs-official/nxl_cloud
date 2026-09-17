@@ -15,6 +15,17 @@ void RegisterSyncRoot(const std::wstring& rootPath, const std::wstring& syncRoot
 // Reverses RegisterSyncRoot. Safe to call even if not currently registered.
 void UnregisterSyncRoot(const std::wstring& syncRootId);
 
+// Finds and unregisters every "Skylyer!" sync root the OS currently has
+// registered, regardless of which account it belongs to — used by the
+// uninstaller (see index.ts's --skylyer-uninstall-cleanup flag) so
+// uninstalling actually removes the Explorer entry instead of leaving it
+// orphaned. Retries the underlying enumeration a few times: confirmed
+// empirically that GetCurrentSyncRoots() can return an empty list on one
+// call and the real entries on the next, with no other state changing in
+// between. Never throws — this is best-effort maintenance, not something
+// that should ever crash the caller.
+void UnregisterAllSyncRoots();
+
 // Connects the FETCH_DATA/CANCEL_FETCH_DATA callback table to `rootPath` so
 // opening a placeholder actually triggers a hydration fetch. Must be called
 // after RegisterSyncRoot and after NativeBridge::SetProvider.

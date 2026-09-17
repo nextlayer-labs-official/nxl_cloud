@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import mime from "mime-types";
 import { ApiClient, ApiError } from "./api-client";
-import { getSyncRootPath, removeSyncRoot, startSyncRoot, stopSyncRoot } from "./sync-root";
+import { getSyncRootPath, removeSyncRoot, startSyncRoot, stopSyncRoot, unregisterAllStaleSyncRoots } from "./sync-root";
 import { createTray } from "./tray";
 import type { SkylyerApi } from "../shared/types";
 
@@ -27,6 +27,15 @@ let quitting = false;
 process.on("uncaughtException", (err) => console.error("[Skylyer] uncaughtException:", err));
 process.on("unhandledRejection", (err) => console.error("[Skylyer] unhandledRejection:", err));
 
+// Invoked by the NSIS uninstaller (build/installer.nsh), launched as its
+// own short-lived process before files are removed, so uninstalling
+// actually removes the Explorer sync-root entry instead of leaving it
+// orphaned (the original bug this exists to fix — see UnregisterAllSyncRoots'
+// doc comment). Checked before the single-instance lock below, deliberately:
+// this must run standalone even if a normal instance happens to be open in
+// the tray at uninstall time, and it never creates a window or touches IPC.
+const isUninstallCleanup = process.argv.includes("--skylyer-uninstall-cleanup");
+
 // Without this, launching Skylyer again while it's already running (e.g.
 // from the Start Menu, with the first instance minimized to the tray) spawns
 // a second full process instead of focusing the existing one — and that
@@ -34,8 +43,17 @@ process.on("unhandledRejection", (err) => console.error("[Skylyer] unhandledReje
 // (same fixed local folder, two different OS-level registrations at once),
 // failing outright. Electron grants the lock to exactly one instance; every
 // other launch attempt gets `false` here and must quit immediately.
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
-if (!gotSingleInstanceLock) {
+const gotSingleInstanceLock = isUninstallCleanup ? false : app.requestSingleInstanceLock();
+if (isUninstallCleanup) {
+  app.whenReady().then(() => {
+    try {
+      unregisterAllStaleSyncRoots();
+    } catch (err) {
+      console.error("[Skylyer] uninstall cleanup failed:", err);
+    }
+    app.quit();
+  });
+} else if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   // Fired on THIS (the one holding the lock) instance whenever a later

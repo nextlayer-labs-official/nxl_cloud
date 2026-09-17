@@ -18,6 +18,8 @@ export interface LocalPlaceholderEntry {
 
 export function registerSyncRoot(rootPath: string, syncRootId: string, displayName: string, iconPath: string): void;
 export function unregisterSyncRoot(syncRootId: string): void;
+/** Finds and unregisters every "Skylyer!" sync root the OS currently has registered, for any account — used by the uninstaller. Retries internally to work around GetCurrentSyncRoots() sometimes returning a stale/empty snapshot; blocks for a couple of seconds, never throws. */
+export function unregisterAllSyncRoots(): void;
 export function connectSyncRoot(rootPath: string): void;
 export function disconnectSyncRoot(): void;
 export function createPlaceholders(parentPath: string, items: PlaceholderItem[]): void;

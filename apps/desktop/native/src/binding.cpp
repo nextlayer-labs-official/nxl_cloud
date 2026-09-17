@@ -50,6 +50,11 @@ Napi::Value UnregisterSyncRoot(const Napi::CallbackInfo& info) {
   return env.Undefined();
 }
 
+Napi::Value UnregisterAllSyncRoots(const Napi::CallbackInfo& info) {
+  skylyer::UnregisterAllSyncRoots();
+  return info.Env().Undefined();
+}
+
 Napi::Value CreatePlaceholders(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsArray()) {
@@ -251,6 +256,7 @@ Napi::Value DehydrateAndRefreshPlaceholder(const Napi::CallbackInfo& info) {
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("registerSyncRoot", Napi::Function::New(env, RegisterSyncRoot));
   exports.Set("unregisterSyncRoot", Napi::Function::New(env, UnregisterSyncRoot));
+  exports.Set("unregisterAllSyncRoots", Napi::Function::New(env, UnregisterAllSyncRoots));
   exports.Set("createPlaceholders", Napi::Function::New(env, CreatePlaceholders));
   exports.Set("connectSyncRoot", Napi::Function::New(env, ConnectSyncRoot));
   exports.Set("disconnectSyncRoot", Napi::Function::New(env, DisconnectSyncRoot));

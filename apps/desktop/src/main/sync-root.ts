@@ -517,3 +517,8 @@ export function removeSyncRoot(userId: string): void {
   stopSyncRoot();
   native.unregisterSyncRoot(syncRootIdFor(userId));
 }
+
+/** Used by the NSIS uninstall hook (build/installer.nsh) so uninstalling actually removes the Explorer entry for whichever account was last logged in, instead of leaving it orphaned. */
+export function unregisterAllStaleSyncRoots(): void {
+  native.unregisterAllSyncRoots();
+}

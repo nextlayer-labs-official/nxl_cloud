@@ -54,6 +54,29 @@ std::runtime_error ToRuntimeError(const char* action, const hresult_error& ex) {
   return std::runtime_error(std::string(wmsg.begin(), wmsg.end()));
 }
 
+// Finds and unregisters every currently-enumerable "Skylyer!" sync root in
+// one pass. Returns how many it found (not necessarily how many it managed
+// to unregister — a single failure is swallowed and counted as found
+// anyway, since GetCurrentSyncRoots() confirmed empirically to sometimes
+// return a stale/empty snapshot is the bigger unreliability here, not the
+// Unregister call itself).
+size_t UnregisterSkylyerRootsOnce() {
+  size_t found = 0;
+  auto currentRoots = StorageProviderSyncRootManager::GetCurrentSyncRoots();
+  for (const auto& existing : currentRoots) {
+    std::wstring existingId(existing.Id().c_str());
+    if (existingId.rfind(L"Skylyer!", 0) == 0) {
+      found++;
+      try {
+        StorageProviderSyncRootManager::Unregister(existingId);
+      } catch (const hresult_error&) {
+        // Best-effort — see callers for what happens next on failure.
+      }
+    }
+  }
+  return found;
+}
+
 }  // namespace
 
 void RegisterSyncRoot(const std::wstring& rootPath, const std::wstring& syncRootId, const std::wstring& displayName,
@@ -70,18 +93,7 @@ void RegisterSyncRoot(const std::wstring& rootPath, const std::wstring& syncRoot
     // (login proceeds normally; only the Explorer entry silently never
     // appears). Proactively clearing out any of our OWN prior registrations
     // first avoids this and self-heals cruft accumulated across sessions.
-    auto currentRoots = StorageProviderSyncRootManager::GetCurrentSyncRoots();
-    for (const auto& existing : currentRoots) {
-      std::wstring existingId(existing.Id().c_str());
-      if (existingId.rfind(L"Skylyer!", 0) == 0) {
-        try {
-          StorageProviderSyncRootManager::Unregister(existingId);
-        } catch (const hresult_error&) {
-          // Best-effort — if this particular stale entry can't be cleared,
-          // the Register() call below will surface a clear failure anyway.
-        }
-      }
-    }
+    UnregisterSkylyerRootsOnce();
 
     StorageFolder folder = StorageFolder::GetFolderFromPathAsync(rootPath).get();
 
@@ -113,6 +125,26 @@ void UnregisterSyncRoot(const std::wstring& syncRootId) {
     // Not-found is a no-op from the caller's perspective (already unregistered).
     if (ex.code() == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) return;
     throw ToRuntimeError("UnregisterSyncRoot", ex);
+  }
+}
+
+void UnregisterAllSyncRoots() {
+  EnsureApartmentInitialized();
+
+  // GetCurrentSyncRoots() confirmed (via live testing) to sometimes return
+  // an empty list on one call and the real entries on the very next, with
+  // nothing else about the system having changed in between — a handful of
+  // retries with a short pause between them is what actually catches a
+  // real, existing registration reliably, matching what worked manually
+  // during that investigation. Deliberately swallows all errors: this is
+  // maintenance run from the uninstaller, not something that should ever
+  // surface a failure that blocks the uninstall itself.
+  try {
+    for (int attempt = 0; attempt < 8; attempt++) {
+      UnregisterSkylyerRootsOnce();
+      Sleep(300);
+    }
+  } catch (...) {
   }
 }
 
