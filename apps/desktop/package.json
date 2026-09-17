@@ -13,10 +13,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
-    "@nextlayer/desktop-native": "file:./native",
     "mime-types": "^3.0.2",
     "react": "19.1.0",
     "react-dom": "19.1.0"
+  },
+  "optionalDependencies": {
+    "@nextlayer/desktop-native": "file:./native"
   },
   "devDependencies": {
     "@eslint/js": "^9",
