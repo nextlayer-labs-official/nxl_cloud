@@ -85,7 +85,7 @@ export function TrashView() {
     <div>
       <h1 className="text-foreground mb-1.5 text-[26px] font-bold tracking-[-0.01em]">Trash</h1>
       <p className="text-ink-450 mb-8 text-sm">
-        Deleted files and folders stay here until you permanently delete them.
+        Deleted files and folders stay here for 7 days, then they're permanently deleted automatically — or you can delete them for good sooner.
       </p>
 
       {(error || actionError) && (
