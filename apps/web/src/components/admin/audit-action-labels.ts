@@ -41,6 +41,7 @@ const ACTION_LABELS: Record<string, string> = {
   "organization.suspended": "suspended the organization",
   "organization.reactivated": "reactivated the organization",
   "organization.deleted": "permanently deleted the organization",
+  "organization.shares_revoked_not_in_good_standing": "auto-revoked all sharing (trial/plan ended)",
   "subscription.plan_changed": "changed the plan",
   "settings.updated": "updated platform settings",
   "member.invited": "invited a member",

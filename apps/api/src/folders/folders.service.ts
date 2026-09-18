@@ -184,6 +184,8 @@ export class FoldersService {
     if (dto.parentId) {
       const parent = await this.getAccessibleFolder(userId, dto.parentId, "EDITOR");
       organizationId = parent.organizationId;
+    } else {
+      await this.organizations.assertOrgInGoodStanding(organizationId);
     }
 
     const folder = await prisma.folder.create({
@@ -233,6 +235,7 @@ export class FoldersService {
     if (!folder || folder.organizationId !== membership.organizationId || folder.deletedAt) {
       throw new NotFoundException("Folder not found.");
     }
+    await this.organizations.assertOrgInGoodStanding(folder.organizationId);
     return folder;
   }
 
@@ -257,6 +260,9 @@ export class FoldersService {
 
   private async getAccessibleFolder(userId: string, folderId: string, minLevel: "VIEWER" | "EDITOR") {
     const { folder, accessLevel } = await this.resolveFolderAccess(userId, folderId);
+    if (minLevel === "EDITOR" && (accessLevel === "OWNER" || accessLevel === "EDITOR")) {
+      await this.organizations.assertOrgInGoodStanding(folder.organizationId);
+    }
     if (accessLevel === "OWNER") return folder;
     if (minLevel === "VIEWER") return folder;
     if (minLevel === "EDITOR" && accessLevel === "EDITOR") return folder;

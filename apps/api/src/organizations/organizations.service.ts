@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@nextlayer/database";
 import { EmailService } from "../email/email.service";
 import type { UpdateOrganizationDto } from "./dto/update-organization.dto";
@@ -218,5 +218,43 @@ export class OrganizationsService {
         `This upload would exceed your storage limit (${limitGb} GB). Delete some files or contact support to increase your limit.`,
       );
     }
+  }
+
+  /**
+   * The live-blocking half of the subscription gate — read-only browsing/
+   * download always stays open, but any mutation (upload, edit, rename,
+   * move, trash, share) on a resource owned by an org that isn't currently
+   * "in good standing" gets blocked here. Deliberately keyed off the
+   * RESOURCE's own organizationId, not the acting user's — a shared
+   * collaborator's own org being fine doesn't matter if the content they're
+   * trying to edit belongs to an org that's gated, and vice versa.
+   *
+   * "In good standing" = ACTIVE or TRIALING with a currentPeriodEnd that
+   * hasn't passed yet (a null currentPeriodEnd, e.g. a plan admins set up
+   * without one, never expires on its own) — or an admin-set `freeUntil`
+   * comp that's still in the future, which always wins regardless of status
+   * (mirrors the same exemption AdminService's MRR calculation already
+   * gives it). Everything else — an elapsed trial, a lapsed paid period
+   * nobody renewed, PAST_DUE (a failed renewal payment), or CANCELED — is
+   * gated the same way. Nothing here writes to `status`; it's a live,
+   * computed check. See SubscriptionEnforcementService for the one-time
+   * (not repeatable) side effect of this state, revoking existing shares.
+   */
+  async assertOrgInGoodStanding(organizationId: string): Promise<void> {
+    const subscription = await prisma.subscription.findUnique({ where: { organizationId } });
+    if (!subscription) return;
+
+    if (subscription.freeUntil && subscription.freeUntil > new Date()) return;
+
+    const inGoodStanding =
+      (subscription.status === "ACTIVE" || subscription.status === "TRIALING") &&
+      (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > new Date());
+    if (inGoodStanding) return;
+
+    throw new ForbiddenException(
+      subscription.status === "TRIALING"
+        ? "Your trial has ended. Upgrade to a plan to continue editing, uploading, or sharing."
+        : "Your plan has ended. Renew your subscription to continue editing, uploading, or sharing.",
+    );
   }
 }

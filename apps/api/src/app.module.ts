@@ -14,6 +14,7 @@ import { PartnerModule } from "./partner/partner.module";
 import { RetentionModule } from "./retention/retention.module";
 import { ShareModule } from "./share/share.module";
 import { StorageModule } from "./storage/storage.module";
+import { SubscriptionEnforcementModule } from "./subscription-enforcement/subscription-enforcement.module";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { StorageModule } from "./storage/storage.module";
     PartnerModule,
     DistributorModule,
     RetentionModule,
+    SubscriptionEnforcementModule,
   ],
   controllers: [AppController],
   providers: [AppService],

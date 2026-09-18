@@ -61,11 +61,13 @@ export class FilesService {
   private async resolveUploadFolder(userId: string, folderId: string | undefined) {
     const membership = await this.organizations.getPrimaryMembership(userId);
     if (!folderId) {
+      await this.organizations.assertOrgInGoodStanding(membership.organizationId);
       return { organizationId: membership.organizationId, orgSlug: membership.organization.slug };
     }
     const folder = await prisma.folder.findUnique({ where: { id: folderId } });
     if (!folder || folder.deletedAt) throw new NotFoundException("Folder not found.");
     if (folder.organizationId === membership.organizationId) {
+      await this.organizations.assertOrgInGoodStanding(folder.organizationId);
       return { organizationId: folder.organizationId, orgSlug: membership.organization.slug };
     }
     const direct = await getDirectAccessLevel("FOLDER", folder.id, userId);
@@ -73,6 +75,7 @@ export class FilesService {
     if (level !== "EDITOR") throw new NotFoundException("Folder not found.");
     const org = await prisma.organization.findUnique({ where: { id: folder.organizationId } });
     if (!org) throw new NotFoundException("Folder not found.");
+    await this.organizations.assertOrgInGoodStanding(folder.organizationId);
     return { organizationId: folder.organizationId, orgSlug: org.slug };
   }
 
@@ -186,6 +189,7 @@ export class FilesService {
     if (!file || file.organizationId !== membership.organizationId || file.deletedAt) {
       throw new NotFoundException("File not found.");
     }
+    await this.organizations.assertOrgInGoodStanding(file.organizationId);
     return file;
   }
 
@@ -211,6 +215,9 @@ export class FilesService {
 
   private async getAccessibleFile(userId: string, fileId: string, minLevel: "VIEWER" | "EDITOR") {
     const { file, accessLevel } = await this.resolveFileAccess(userId, fileId);
+    if (minLevel === "EDITOR" && (accessLevel === "OWNER" || accessLevel === "EDITOR")) {
+      await this.organizations.assertOrgInGoodStanding(file.organizationId);
+    }
     if (accessLevel === "OWNER") return file;
     if (minLevel === "VIEWER") return file;
     if (minLevel === "EDITOR" && accessLevel === "EDITOR") return file;
