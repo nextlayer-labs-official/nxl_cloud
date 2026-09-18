@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ScheduleModule } from "@nestjs/schedule";
 import { AdminModule } from "./admin/admin.module";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
@@ -10,11 +11,13 @@ import { FoldersModule } from "./folders/folders.module";
 import { HealthModule } from "./health/health.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
 import { PartnerModule } from "./partner/partner.module";
+import { RetentionModule } from "./retention/retention.module";
 import { ShareModule } from "./share/share.module";
 import { StorageModule } from "./storage/storage.module";
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     HealthModule,
     AuthModule,
     OrganizationsModule,
@@ -26,6 +29,7 @@ import { StorageModule } from "./storage/storage.module";
     AdminModule,
     PartnerModule,
     DistributorModule,
+    RetentionModule,
   ],
   controllers: [AppController],
   providers: [AppService],
