@@ -112,10 +112,14 @@ export class BillingService {
 
   async getSubscription(userId: string) {
     const membership = await this.organizations.getPrimaryMembership(userId);
-    return prisma.subscription.findUnique({
+    const subscription = await prisma.subscription.findUnique({
       where: { organizationId: membership.organizationId },
       include: { plan: true },
     });
+    if (!subscription) return null;
+    // Lets the Plan & Billing tab show a "trial ended"/"plan ended" flag —
+    // same rule the upload/edit/share gate enforces server-side.
+    return { ...subscription, inGoodStanding: this.organizations.isOrgInGoodStanding(subscription) };
   }
 
   /**

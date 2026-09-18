@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Clock, Folder, FolderPlus, Plus, Star, Trash2, Upload, Users } from "lucide-react";
+import { AlertTriangle, ChevronDown, Clock, Folder, FolderPlus, Plus, Star, Trash2, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ import { usePortal } from "./portal-context";
 interface Usage {
   usedBytes: number;
   limitBytes: number | null;
+  inGoodStanding: boolean;
+  subscriptionStatus: "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | null;
 }
 
 export function PortalSidebar() {
@@ -189,18 +191,29 @@ export function PortalSidebar() {
             />
           </div>
         )}
-        <div className="text-ink-450 mb-3 text-[11px]">
+        <div className="text-ink-450 mb-1.5 text-[11px]">
           {usage === null
             ? "—"
             : usage.limitBytes === null
               ? `${formatBytes(usage.usedBytes)} used`
               : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.limitBytes)} used`}
         </div>
+        {usage && !usage.inGoodStanding && (
+          <div className="text-error-text mb-3 flex items-center gap-1.5 text-[11px] font-semibold">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {usage.subscriptionStatus === "TRIALING" ? "Trial ended" : "Plan expired"} — read-only until you renew
+          </div>
+        )}
         <Link
           href="/portal/settings?tab=billing"
-          className="border-input text-foreground hover:bg-background block w-full cursor-pointer rounded-lg border py-2 text-center text-[13px] font-semibold"
+          className={cn(
+            "block w-full cursor-pointer rounded-lg border py-2 text-center text-[13px] font-semibold",
+            usage && !usage.inGoodStanding
+              ? "bg-error-text border-error-text text-white hover:opacity-90"
+              : "border-input text-foreground hover:bg-background",
+          )}
         >
-          Get more storage
+          {usage && !usage.inGoodStanding ? "Upgrade now" : "Get more storage"}
         </Link>
       </div>
     </aside>

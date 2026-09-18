@@ -937,6 +937,13 @@ export function SettingsView() {
                     {subscription?.currentPeriodEnd &&
                       ` · ${subscription.status === "TRIALING" ? "trial ends" : "renews"} ${formatDate(subscription.currentPeriodEnd)}`}
                   </div>
+                  {subscription && !subscription.inGoodStanding && (
+                    <div className="text-error-text mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {subscription.status === "TRIALING" ? "Trial ended" : "Plan ended"} — uploads, edits, and
+                      sharing are paused until you renew.
+                    </div>
+                  )}
                 </div>
               </div>
 

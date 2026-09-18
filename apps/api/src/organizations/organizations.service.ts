@@ -79,7 +79,33 @@ export class OrganizationsService {
       fileCount,
       limitBytes: this.effectiveLimitBytes(subscription),
       planName: subscription?.plan.name ?? null,
+      // Lets the sidebar/settings show a "trial ended"/"plan ended" flag —
+      // same rule assertOrgInGoodStanding enforces server-side, just
+      // surfaced here for the UI instead of thrown as an error.
+      inGoodStanding: this.isOrgInGoodStanding(subscription),
+      subscriptionStatus: subscription?.status ?? null,
+      currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
     };
+  }
+
+  /**
+   * True if the org's subscription is currently active/trialing with an
+   * unexpired period, or comped via an admin-set `freeUntil` that's still
+   * in the future (always wins regardless of status — mirrors the same
+   * exemption AdminService's MRR calculation already gives it). No
+   * subscription row at all is treated as "fine" — don't block on missing
+   * data. Shared by assertOrgInGoodStanding (throws) and getUsage (surfaces
+   * it to the UI instead).
+   */
+  isOrgInGoodStanding(
+    subscription: { status: string; currentPeriodEnd: Date | null; freeUntil: Date | null } | null,
+  ): boolean {
+    if (!subscription) return true;
+    if (subscription.freeUntil && subscription.freeUntil > new Date()) return true;
+    return (
+      (subscription.status === "ACTIVE" || subscription.status === "TRIALING") &&
+      (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > new Date())
+    );
   }
 
   async updateName(userId: string, dto: UpdateOrganizationDto) {
@@ -242,17 +268,10 @@ export class OrganizationsService {
    */
   async assertOrgInGoodStanding(organizationId: string): Promise<void> {
     const subscription = await prisma.subscription.findUnique({ where: { organizationId } });
-    if (!subscription) return;
-
-    if (subscription.freeUntil && subscription.freeUntil > new Date()) return;
-
-    const inGoodStanding =
-      (subscription.status === "ACTIVE" || subscription.status === "TRIALING") &&
-      (!subscription.currentPeriodEnd || subscription.currentPeriodEnd > new Date());
-    if (inGoodStanding) return;
+    if (this.isOrgInGoodStanding(subscription)) return;
 
     throw new ForbiddenException(
-      subscription.status === "TRIALING"
+      subscription?.status === "TRIALING"
         ? "Your trial has ended. Upgrade to a plan to continue editing, uploading, or sharing."
         : "Your plan has ended. Renew your subscription to continue editing, uploading, or sharing.",
     );

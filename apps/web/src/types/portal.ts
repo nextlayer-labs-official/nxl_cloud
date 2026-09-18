@@ -135,6 +135,8 @@ export interface SubscriptionInfo {
   freeUntil: string | null;
   creditBalanceCents: number;
   plan: Plan;
+  /** False once the trial/period has lapsed without renewal, or the subscription is PAST_DUE/CANCELED — unless an admin-set freeUntil comp is still in the future. */
+  inGoodStanding: boolean;
 }
 
 export interface Transaction {
