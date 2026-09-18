@@ -11,7 +11,10 @@ export function formatBytes(bytes: number): string {
 }
 
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+  // Pinned to "en-US" (not `undefined`) so server-rendered and client-hydrated
+  // output always match — the runtime's default locale can otherwise differ
+  // between Node and the browser, which React treats as a hydration mismatch.
+  return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
